@@ -11,6 +11,8 @@ class TelegramJsonParser:
 
     def parse_message_dict(self, msg_dict: Dict[str, Any]) -> Optional[Message]:
         """Parses a single Telegram message dictionary into a domain Message entity."""
+        if not isinstance(msg_dict, dict):
+            return None
 
         # Skip service messages or non-message entries
         if msg_dict.get("type") != "message":
@@ -25,11 +27,16 @@ class TelegramJsonParser:
             return None
 
         # Sender ID extraction
-        sender_id = msg_dict.get("from_id")
-        sender_name = msg_dict.get("from")
+        from_id = msg_dict.get("from_id")
+        if from_id is not None:
+            sender_id = str(from_id)
+        else:
+            sender_id = str(msg_dict.get("actor_id", msg_dict.get("from", "unknown")))
+
+        sender_name = str(msg_dict.get("from", msg_dict.get("actor", "Unknown")))
 
         # Reply to message ID handling
-        raw_reply_id = msg_dict.get("reply_to_message_id")
+        raw_reply_id = msg_dict.get("reply_to_message_id", msg_dict.get("reply_to_msg_id"))
         if raw_reply_id is not None:
             try:
                 reply_to_msg_id = int(raw_reply_id)
@@ -45,7 +52,7 @@ class TelegramJsonParser:
         timestamp = self._parse_timestamp(msg_dict)
 
         # Text extraction
-        text = self._extract_text(msg_dict.get("text"))
+        text = self._extract_text(msg_dict.get("text", ""))
 
         # Content type determination
         content_type = self._determine_content_type(msg_dict)
@@ -54,6 +61,7 @@ class TelegramJsonParser:
         is_forwarded = bool(
             msg_dict.get("forwarded_from")
             or msg_dict.get("forwarded_from_id")
+            or msg_dict.get("is_forwarded", False)
         )
 
         return Message(
@@ -142,5 +150,21 @@ class TelegramJsonParser:
 
     def _determine_content_type(self, msg_dict: Dict[str, Any]) -> ContentType:
         """Determines ContentType from Telegram message fields."""
+        media_type = msg_dict.get("media_type")
 
-        ## TO BE IMPLEMENTED
+        if media_type == "voice_message":
+            return ContentType.VOICE
+
+        if media_type == "sticker" or "sticker_emoji" in msg_dict:
+            return ContentType.STICKER
+
+        if "photo" in msg_dict or media_type == "photo":
+            return ContentType.PHOTO
+
+        if (
+            media_type in ("document", "video_file", "animation", "audio_file", "video_message")
+            or "file" in msg_dict
+        ):
+            return ContentType.DOCUMENT
+
+        return ContentType.TEXT
