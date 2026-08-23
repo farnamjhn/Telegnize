@@ -19,7 +19,7 @@ class SQLiteMessageRepository(IMessageRepository):
         """Create and configure a SQLite connection contextmanager."""
         if self.db_path == ":memory:":
             if self._shared_connection is None:
-                self._shared_connection = sqlite3.connect(":memory:")
+                self._shared_connection = sqlite3.connect(":memory:", check_same_thread=False)
                 self._shared_connection.row_factory = sqlite3.Row
                 self._shared_connection.execute("PRAGMA journal_mode = WAL;")
                 self._shared_connection.execute("PRAGMA foreign_keys = ON;")
