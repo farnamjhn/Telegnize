@@ -1,68 +1,77 @@
+"""Port for message storage and the aggregate queries analytics needs."""
+
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from collections.abc import Iterable, Sequence
 
 from domain.models.message import Message
-from domain.models.analysis import LayaDecisionResult
 
 
 class IMessageRepository(ABC):
+    """Stores messages and answers aggregate questions about them.
+
+    The aggregate methods exist so callers never have to materialise a whole
+    chat to compute a statistic: an export can hold millions of messages.
+    """
+
+    # --- writes -----------------------------------------------------------
     @abstractmethod
     def save(self, message: Message) -> None:
-        """Saves a message."""
-        pass
+        """Inserts a message, replacing any existing one with the same key."""
 
     @abstractmethod
-    def save_batch(self, messages: List[Message]) -> None:
-        """Saves a batch of messages."""
-        pass
+    def save_batch(self, messages: Sequence[Message]) -> int:
+        """Inserts a batch in one transaction; returns the number written."""
+
+    # --- reads ------------------------------------------------------------
+    @abstractmethod
+    def get_by_id(self, message_id: int) -> Message | None:
+        """Gets a message by its Telegnize identifier."""
 
     @abstractmethod
-    def get_by_id(self, message_id: int) -> Optional[Message]:
-        """Gets the message with specified id."""
-        pass
+    def get_by_telegram_id(
+        self, telegram_msg_id: int, chat_id: int | None = None
+    ) -> Message | None:
+        """Gets a message by its Telegram identifier, optionally scoped to a chat."""
 
     @abstractmethod
-    def get_by_telegram_id(self, message_telegram_id: int, chat_id: Optional[int] = None) -> Optional[Message]:
-        """Gets the message using telegram_msg_id and optional chat_id."""
-        pass
-
-    @abstractmethod
-    def get_all_orderd(self) -> List[Message]:
-        """Gets all the messages from the database ordered by timestamp."""
-        pass
-
-    @abstractmethod
-    def get_all_ordered(self) -> List[Message]:
-        """Alias for get_all_orderd."""
-        pass
-
-    @abstractmethod
-    def get_by_chat(
+    def list_messages(
         self,
-        chat_id: int,
+        chat_id: int | None = None,
         limit: int = 100,
         offset: int = 0,
-        sender_id: Optional[str] = None,
-    ) -> List[Message]:
-        """Gets messages for a given chat with pagination and optional sender filter."""
-        pass
+        sender_id: str | None = None,
+    ) -> list[Message]:
+        """Lists messages chronologically, filtered and paginated."""
 
+    @abstractmethod
+    def iter_chat_timeline(self, chat_id: int) -> Iterable[Message]:
+        """Yields a chat's messages chronologically without buffering them all."""
+
+    # --- aggregates -------------------------------------------------------
     @abstractmethod
     def count_by_chat(self, chat_id: int) -> int:
-        """Counts total messages in a chat."""
-        pass
+        """Counts messages in a chat."""
 
     @abstractmethod
-    def get_chat_timeline(self, chat_id: int) -> List[Message]:
-        """Gets all messages for a chat ordered chronologically."""
-        pass
+    def get_date_range(self, chat_id: int) -> tuple[str | None, str | None]:
+        """Returns the (first, last) message timestamps of a chat as ISO strings."""
 
     @abstractmethod
-    def save_laya_decision(self, decision: LayaDecisionResult) -> None:
-        """Saves or updates a Laya schematic decision result."""
-        pass
+    def get_participant_totals(self, chat_id: int) -> list[dict[str, object]]:
+        """Per-sender message, word, char, question, and cold-closure totals."""
 
     @abstractmethod
-    def get_laya_decisions(self, target_type: str, target_id: int) -> List[LayaDecisionResult]:
-        """Gets saved Laya decisions for a given target ('message' or 'chat')."""
-        pass
+    def get_hourly_distribution(self, chat_id: int) -> dict[int, int]:
+        """Message counts keyed by hour of day (0-23)."""
+
+    @abstractmethod
+    def get_daily_distribution(self, chat_id: int) -> dict[str, int]:
+        """Message counts keyed by weekday name."""
+
+    @abstractmethod
+    def get_language_distribution(self, chat_id: int) -> dict[str, int]:
+        """Message counts keyed by detected language tag."""
+
+    @abstractmethod
+    def get_response_latencies(self, chat_id: int) -> dict[str, list[float]]:
+        """Per-sender response latencies in seconds, for turns they answered."""

@@ -1,47 +1,48 @@
-from dataclasses import dataclass
+"""Message-shaped payloads."""
+
 from datetime import datetime
-from typing import Optional
 
-from domain.models.message import Message
+from pydantic import BaseModel, ConfigDict
+
+from domain.models.language import Language
+from domain.models.message import ContentType, Message
 
 
-@dataclass
-class MessageDTO:
+class MessageDTO(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
+    chat_id: int
+    telegram_msg_id: int
     sender_id: str
     sender_name: str
     timestamp: datetime
     text: str
-    word_count: int
-    is_question: bool
-    chat_id: int = 1
-    normalized_text: str = ""
-    language: str = "unknown"
-    content_type: str = "text"
-    reply_to_msg_id: Optional[int] = None
+    normalized_text: str
+    language: Language
+    content_type: ContentType
+    reply_to_msg_id: int | None = None
     is_forwarded: bool = False
-    is_cold_closure: bool = False
+    # Derived on the entity; surfaced here so clients need not recompute them.
+    word_count: int
+    char_count: int
+    is_question: bool
+    is_cold_closure: bool
 
     @classmethod
     def from_domain(cls, message: Message) -> "MessageDTO":
-        content_type_str = (
-            message.content_type.value
-            if hasattr(message.content_type, "value")
-            else str(message.content_type)
-        )
-        return cls(
-            id=message.id,
-            chat_id=message.chat_id,
-            sender_id=message.sender_id,
-            sender_name=message.sender_name,
-            timestamp=message.timestamp,
-            text=message.text,
-            normalized_text=message.normalized_text or message.text,
-            language=message.language,
-            word_count=message.word_count,
-            is_question=message.is_question,
-            content_type=content_type_str,
-            reply_to_msg_id=message.reply_to_msg_id,
-            is_forwarded=message.is_forwarded,
-            is_cold_closure=message.is_cold_closure,
-        )
+        return cls.model_validate(message)
+
+
+class MessageCreateDTO(BaseModel):
+    """A message submitted directly rather than imported from an export."""
+
+    telegram_msg_id: int
+    sender_id: str
+    sender_name: str
+    timestamp: datetime
+    text: str = ""
+    chat_id: int = 1
+    reply_to_msg_id: int | None = None
+    content_type: ContentType = ContentType.TEXT
+    is_forwarded: bool = False

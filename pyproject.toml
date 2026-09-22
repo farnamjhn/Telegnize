@@ -1,17 +1,50 @@
 [project]
 name = "telegnize"
-version = "0.1.0"
-description = "Telegram chat export analyzer"
+version = "0.3.0"
+description = "Telegram chat export analyzer with multilingual NLP and typed decisions"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141.1",
     "hazm>=0.12.1",
-    "httpx>=0.28.1",
     "ijson>=3.5.1",
     "laya>=0.3.5",
-    "nltk>=3.10.3",
     "pydantic>=2.13.4",
     "python-multipart>=0.0.32",
     "uvicorn>=0.53.0",
 ]
+
+[project.scripts]
+telegnize = "main:main"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",  # required by fastapi.testclient
+    "pytest>=8.3.0",
+    "ruff>=0.8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["domain", "application", "infrastructure"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 90
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "B008",                      # FastAPI's Depends()/File() defaults are the idiom
+    "RUF001", "RUF002", "RUF003",  # Persian text is not "ambiguous unicode" here
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["application", "domain", "infrastructure", "tests"]

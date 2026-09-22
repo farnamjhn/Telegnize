@@ -1,169 +1,132 @@
 # Contributing to Telegnize
 
-Welcome to the **Telegnize** contribution guide! This document provides instructions and standards for both **human developers** and **autonomous AI agents** working on extending, optimizing, and maintaining Telegnize.
+This is the guide for anyone extending Telegnize — human or agent. Read
+[architecture.md](architecture.md) first for how the pieces fit together;
+this document is about the rules to keep to while changing them.
 
 ---
 
-## 1. Project Overview & Design Philosophy
+## 1. Design principles
 
-**Telegnize** is a high-performance Telegram chat export analyzer and intelligence engine.
-
-### Core Architectural Principles
-1. **Domain-Driven & Layered Architecture**: Strict separation of concerns:
-   - `domain/`: Pure business entities (`Chat`, `Message`), lexicons, and repository interfaces (`IChatRepository`, `IMessageRepository`). Zero external framework dependencies.
-   - `application/`: DTOs and orchestration services (`IngestionService`, `AnalyticsService`, `DecisionService`).
-   - `infrastructure/`: Concrete adapters (FastAPI controllers, SQLite persistence, `ijson` streaming parser, Hazm/NLTK text normalizers, Laya System 1 decision engine).
-2. **Stream-First Processing**: Never load full Telegram export JSONs into RAM with `json.load`. Always stream using `ijson.items(stream, "messages.item")` in configurable batches.
-3. **System 1 Typed Decisions**: When classifying or routing text, use the **Laya** decision engine (`choice`, `score`, `noul`). Do not introduce slow token-by-token generative LLMs where a calibrated 33ms decision engine suffices.
-4. **Multilingual by Default**: Treat Persian (`fa`) and English (`en`) as first-class citizens:
-   - Persian text must be normalized through `hazm` (handling ZWNJ, half-spaces, Arabic/Persian character harmonization).
-   - English text is normalized via `nltk` and regex.
-   - Multilingual punctuation (such as `؟` vs `?`) must always be recognized.
-
----
-
-## 2. Directory Structure
-
+### Dependencies point inward
 ```
-Telegnize/
-├── application/
-│   ├── dtos/                   # Data transfer objects for API and services
-│   └── services/               # IngestionService, AnalyticsService, DecisionService
-├── domain/
-│   ├── models/                 # Chat, Message, Analysis domain entities
-│   │   └── dict/lexicons.py    # Linguistic constants & low-investment tokens
-│   └── repository/             # Repository interfaces (IChatRepository, etc.)
-├── infrastructure/
-│   ├── api/                    # FastAPI app, dependencies, and APIRouters
-│   │   └── routers/            # chats.py, messages.py, analytics.py, decisions.py
-│   ├── decision_engine/        # Laya engine wrapper & schematic typed questions
-│   ├── nlp/                    # Multilingual text normalizer (hazm, nltk, re)
-│   ├── parser/                 # Streaming JSON parser using ijson
-│   ├── presistence/            # schema.sql (SQLite DDL)
-│   └── repository/             # Concrete SQLite implementations with WAL mode
-├── docs/                       # Architecture plans, walkthroughs, guides
-├── tests/                      # Unit and integration test suite
-├── example.json                # Reference Telegram chat export (~50k lines)
-├── pyproject.toml              # Project dependencies managed by uv
-└── main.py                     # API entrypoint
+domain/          entities, lexicons, repository interfaces   — no frameworks
+application/     services, DTOs, outbound ports              — no adapters
+infrastructure/  FastAPI, SQLite, ijson, hazm, Laya          — the outside world
 ```
 
+- `domain/` imports nothing but the standard library. No FastAPI, no Pydantic,
+  no `sqlite3`, no `laya`.
+- `application/` imports `domain` and its own ports. **It must not import
+  `infrastructure`.** If a service needs something from the outside world, add
+  an interface under `application/ports/` and implement it in `infrastructure/`.
+- `infrastructure/` may import both. It is the only layer allowed to know a
+  vendor's wire format.
+- `infrastructure/api/container.py` is the single place the two halves are
+  wired together. Nothing else constructs a repository or an adapter.
+
+### Stream, never slurp
+Telegram exports run to gigabytes. Use
+`IExportReader.stream_messages(...)`, which yields batches. `json.load(f)` on
+an upload path is a bug; `parse_file` exists for tests and small fixtures and
+says so in its docstring.
+
+### Derive once, in the entity
+If a value can be computed from a message, it belongs as a property on
+`Message` — one definition of what "a question" or "a cold closure" is. Values
+analytics aggregates over are also written into columns at save time, so
+queries can `SUM` them instead of loading rows.
+
+### Aggregate in SQL
+Analytics must not materialise a chat. Add an aggregate method to
+`IMessageRepository` and implement it as a query. `iter_chat_timeline` exists
+for the rare case that genuinely needs ordered rows, and it streams.
+
+### Raise domain errors, not HTTP errors
+Services raise from `domain/errors.py`. Routers do not catch them — the
+handlers in `infrastructure/api/app.py` translate them. A service that imports
+`fastapi` is in the wrong layer.
+
 ---
 
-## 3. Getting Started & Development Workflow
+## 2. Getting started
 
-### Prerequisites
-- Python `>= 3.12`
-- [`uv`](https://github.com/astral-sh/uv) (recommended Python package manager)
+Prerequisites: Python ≥ 3.12 and [`uv`](https://github.com/astral-sh/uv).
 
-### Installation
 ```bash
-# Clone the repository
-git clone https://github.com/farnam-jhn/Telegnize.git
-cd Telegnize
-
-# Install dependencies using uv
 uv sync
+uv run telegnize          # serves on http://127.0.0.1:8000, docs at /docs
 ```
 
-### Running the API Server
 ```bash
-# Start server with auto-reload on port 8000
-uv run uvicorn main:app --reload --port 8000
+uv run python -m unittest discover -s tests -t .
 ```
-- Interactive OpenAPI documentation: `http://localhost:8000/docs`
-- Health check: `http://localhost:8000/`
 
-### Running the Test Suite
-All contributions must pass all unit tests:
 ```bash
-uv run python -m unittest discover tests
+uv run ruff check . --fix
 ```
 
----
-
-## 4. Guidelines for AI Agents (Agentic Instructions)
-
-If you are an autonomous AI coding agent (e.g. Antigravity, Claude Engineer, Codex, etc.), follow these mandatory rules:
-
-### 1. Memory & Streaming (`ijson`)
-- Telegram exports can exceed several gigabytes. **NEVER** use `json.loads(file.read())` or `json.load(f)` on export uploads.
-- Always use `TelegramJsonParser.stream_messages(...)` which utilizes `ijson.items(f, 'messages.item')` and yields batches of domain `Message` entities.
-
-### 2. Working with the Laya Decision Engine
-- Laya is imported as `from laya import Router`.
-- When instantiating `Router`, avoid `preload=True` during cold start if memory is constrained. Use lazy loading or singleton access via `get_decision_engine()`.
-- Router automatically chooses checkpoints:
-  - English text (`latin`) -> `convaiinnovations/laya` (ModernBERT-large)
-  - Non-Latin text (`arabic`/Persian) -> `convaiinnovations/laya` (mmBERT-base multilingual)
-- Output formats:
-  - `choice`: returns `choice` string, `probabilities` dict, and calibrated `confidence`.
-  - `noul`: returns boolean true/false.
-  - `score`: returns float score within range.
-- Cache decision results in the `laya_decisions` table to avoid redundant model passes.
-
-### 3. Database Schema Evolutions & Migrations
-- SQLite runs in `WAL` mode (`PRAGMA journal_mode = WAL;`) and enforces foreign keys (`PRAGMA foreign_keys = ON;`).
-- When introducing new columns, update `infrastructure/presistence/schema.sql`.
-- **Always update `_init_db()` in `SQLiteMessageRepository` or `SQLiteChatRepository`** with `PRAGMA table_info(...)` checks and `ALTER TABLE ... ADD COLUMN ...` statements so existing SQLite files don't fail with `no such column` errors.
-
-### 4. Text Normalization Pipeline
-- Any new text field ingested into Telegnize must be passed through `TextNormalizer.get_instance().normalize(raw_text)`.
-- Store both `raw_text` (unmodified source text) and `normalized_text` (processed by Hazm/NLTK).
-- When writing regex for tokenization, use `\w+` with Unicode support so Persian words (`[\u0600-\u06FF]`) are counted correctly.
+`tests/test_laya_engine.py` runs real model weights (~40s, needs network on
+first run). Set `TELEGNIZE_SKIP_MODEL_TESTS=1` to skip it; everything that
+depends on the engine is also covered against `tests/fakes.FakeDecisionEngine`.
 
 ---
 
-## 5. Guidelines for Human Developers
+## 3. Common changes
 
-### Git Conventions
-- **Branches**: Use descriptive branch names:
-  - `feat/feature-name`
-  - `fix/bug-description`
-  - `perf/optimization-area`
-- **Commits**: Follow Conventional Commits format:
-  - `feat(laya): add intent detection question schema`
-  - `fix(parser): handle missing actor_id in channel posts`
-  - `test(analytics): add reply gap threshold verification`
+### Adding a decision question
+1. Add a `DecisionQuestion` to `application/decision_questions.py`. A `choice`
+   question needs at least two `criteria`; a `score` question needs at least
+   two `levels`; a `noul` needs neither. These are validated on construction —
+   a malformed question used to crash inside the model.
+2. Cover it in `tests/test_decision_service.py` against the fake engine.
 
-### Adding a New Laya Question Schema
-To add a new decision task (e.g. customer support escalation or sentiment classification):
-1. Open `infrastructure/decision_engine/schemas.py`.
-2. Define your typed question set:
-   ```python
-   NEW_TASK_QUESTIONS = {
-       "escalate": {
-           "type": "noul",
-           "instructions": "Does this message require immediate human escalation?"
-       }
-   }
-   ```
-3. Expose the schema or helper method in `DecisionService`.
-4. Add endpoint or query parameter in `infrastructure/api/routers/decisions.py`.
-5. Add unit tests in `tests/test_laya_engine.py`.
+Callers can also override the question set per request by posting
+`{"questions": {...}}`, which `questions_from_payload` turns into typed
+questions.
 
-### Adding New Analytics Metrics
-1. Add new field(s) in `domain/models/analysis.py` and `application/dtos/analysis_dto.py`.
-2. Implement calculation logic in `AnalyticsService.compute_chat_analytics()`.
-3. Add assertions in `tests/test_analytics.py`.
+### Adding an analytics metric
+1. Add the field to `ChatAnalytics` and `ChatAnalyticsDTO`.
+2. Add an aggregate method to `IMessageRepository` and implement it as a query
+   in `SQLiteMessageRepository`. Do not add a Python loop over a whole chat.
+3. Assert on it in `tests/test_analytics.py`, and on the query itself in
+   `tests/test_sqlite_repositories.py`.
+
+### Changing the database schema
+1. Edit `infrastructure/persistence/schema.sql`. Every statement must be
+   idempotent — it runs on every start.
+2. Add an entry to `_MIGRATIONS` in
+   `infrastructure/persistence/database.py` so databases created by an earlier
+   version gain the column instead of failing with `no such column`.
+
+### Adding a new export format
+Implement `IExportReader` in `infrastructure/parser/` and select it in the
+container. `IngestionService` does not change.
 
 ---
 
-## 6. Troubleshooting & FAQs
+## 4. Conventions
 
-**Q: Hugging Face hub rate limits or slow downloads for Laya weights?**
-> Set your Hugging Face token in the environment:
-> ```bash
-> export HF_TOKEN="hf_your_token_here"
-> ```
-> Weights are cached locally in `~/.cache/huggingface/hub/` after the first run.
-
-**Q: Ingestion runs out of memory?**
-> Ensure `batch_size` in `IngestionService.ingest_export` is kept between 200 and 1000 messages (default: 500).
-
-**Q: Why are Persian question marks not detected?**
-> Ensure you check for both `?` (ASCII) and `؟` (`\u061f` Persian/Arabic question mark) or use `msg.is_question`.
+- **Branches**: `feat/…`, `fix/…`, `perf/…`, `docs/…`.
+- **Commits**: Conventional Commits, e.g. `feat(decisions): add escalation
+  question`, `fix(parser): handle channel posts without actor_id`.
+- **Text**: any ingested text goes through `ITextNormalizer.normalize`, and
+  both the raw `text` and the `normalized_text` are stored. Persian and English
+  are both first-class: recognise `؟` wherever you recognise `?`, and use
+  `\w+` with Unicode for tokenisation.
+- **Tests**: name what the behaviour is, not which method is called —
+  `test_self_replies_do_not_count_as_responses`, not `test_latency_2`.
 
 ---
 
-Thank you for contributing to Telegnize! 🚀
+## 5. Troubleshooting
+
+**Slow or rate-limited Laya downloads.** Set `HF_TOKEN`; weights cache in
+`~/.cache/huggingface/hub/` after the first run. Set
+`TELEGNIZE_PRELOAD_DECISION_ENGINE=1` to load them at startup instead of on the
+first request.
+
+**Ingestion memory.** Lower `TELEGNIZE_INGEST_BATCH_SIZE` (default 500).
+
+**Persian question marks missed.** Use `Message.is_question` or
+`TextNormalizer.is_question` rather than checking `"?"` by hand.

@@ -1,104 +1,102 @@
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+"""Typed decision endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from collections.abc import Mapping
+from typing import Any
 
-from application.dtos.analysis_dto import LayaDecisionDTO
-from application.services.decision_service import DecisionService
-from infrastructure.api.dependencies import get_decision_service
+from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
-router = APIRouter(prefix="/decisions", tags=["Laya Decisions"])
+from application.dtos.analysis_dto import DecisionDTO
+from application.ports.decision_engine import DecisionQuestion
+from application.services.decision_service import (
+    DEFAULT_WINDOW_SIZE,
+    questions_from_payload,
+)
+from domain.models.analysis import DecisionTarget
+from infrastructure.api.dependencies import DecisionServiceDep
+
+router = APIRouter(prefix="/decisions", tags=["Decisions"])
+
+QuestionSpec = Mapping[str, Any]
 
 
-class LayaDecisionSchema(BaseModel):
-    target_type: str
-    target_id: int
-    question_key: str
-    decision_type: str
-    result_value: Any
-    confidence: float
-    probabilities: Dict[str, float] = {}
-    created_at: Optional[datetime] = None
+class QuestionOverride(BaseModel):
+    """Replaces the built-in question set for one request."""
 
-    class Config:
-        from_attributes = True
+    questions: dict[str, QuestionSpec] | None = Field(
+        default=None,
+        description="Question key to {type, instructions, criteria}. "
+        "Omit to use Telegnize's own question set.",
+    )
+
+
+class EvaluateDialogueRequest(QuestionOverride):
+    limit: int = Field(DEFAULT_WINDOW_SIZE, ge=1, le=200)
 
 
 class CustomDecisionRequest(BaseModel):
     state: Any
-    questions: Dict[str, Any]
+    questions: dict[str, QuestionSpec]
 
 
-class EvaluateDialogueRequest(BaseModel):
-    limit: int = 20
-    custom_questions: Optional[Dict[str, Any]] = None
-
-
-@router.post("/messages/{message_id}", response_model=List[LayaDecisionSchema])
+@router.post(
+    "/messages/{message_id}",
+    response_model=list[DecisionDTO],
+    summary="Evaluate one message",
+)
 def evaluate_message(
     message_id: int,
-    custom_questions: Optional[Dict[str, Any]] = None,
-    decision_service: DecisionService = Depends(get_decision_service),
-):
-    """Evaluates a message with Laya System 1 decision engine and persists decisions."""
-    decisions = decision_service.evaluate_message(message_id, questions=custom_questions)
-    if not decisions:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Message {message_id} not found or has no evaluatable content.",
-        )
-    return [LayaDecisionSchema.model_validate(d) for d in decisions]
+    decision_service: DecisionServiceDep,
+    payload: QuestionOverride | None = None,
+) -> list[DecisionDTO]:
+    questions = questions_from_payload(payload.questions if payload else None)
+    return decision_service.evaluate_message(message_id, questions=questions)
 
 
-@router.get("/messages/{message_id}", response_model=List[LayaDecisionSchema])
+@router.get(
+    "/messages/{message_id}",
+    response_model=list[DecisionDTO],
+    summary="Read cached decisions about a message",
+)
 def get_cached_message_decisions(
-    message_id: int,
-    decision_service: DecisionService = Depends(get_decision_service),
-):
-    """Retrieves previously cached Laya decisions for a message."""
-    decisions = decision_service.get_cached_decisions("message", message_id)
-    return [LayaDecisionSchema.model_validate(d) for d in decisions]
+    message_id: int, decision_service: DecisionServiceDep
+) -> list[DecisionDTO]:
+    return decision_service.get_cached(DecisionTarget.MESSAGE, message_id)
 
 
-@router.post("/chats/{chat_id}", response_model=List[LayaDecisionSchema])
+@router.post(
+    "/chats/{chat_id}",
+    response_model=list[DecisionDTO],
+    summary="Evaluate a chat's recent conversation window",
+)
 def evaluate_chat_dialogue(
     chat_id: int,
-    payload: Optional[EvaluateDialogueRequest] = None,
-    decision_service: DecisionService = Depends(get_decision_service),
-):
-    """Evaluates recent dialogue window in a chat for dynamic and sentiment."""
-    limit = payload.limit if payload else 20
-    q = payload.custom_questions if payload else None
-    decisions = decision_service.evaluate_chat_window(chat_id, limit=limit, questions=q)
-    if not decisions:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No dialogue messages found to evaluate for chat {chat_id}.",
-        )
-    return [LayaDecisionSchema.model_validate(d) for d in decisions]
+    decision_service: DecisionServiceDep,
+    payload: EvaluateDialogueRequest | None = None,
+) -> list[DecisionDTO]:
+    questions = questions_from_payload(payload.questions if payload else None)
+    return decision_service.evaluate_chat_window(
+        chat_id,
+        limit=payload.limit if payload else DEFAULT_WINDOW_SIZE,
+        questions=questions,
+    )
 
 
-@router.get("/chats/{chat_id}", response_model=List[LayaDecisionSchema])
+@router.get(
+    "/chats/{chat_id}",
+    response_model=list[DecisionDTO],
+    summary="Read cached decisions about a chat",
+)
 def get_cached_chat_decisions(
-    chat_id: int,
-    decision_service: DecisionService = Depends(get_decision_service),
-):
-    """Retrieves previously cached Laya decisions for a chat."""
-    decisions = decision_service.get_cached_decisions("chat", chat_id)
-    return [LayaDecisionSchema.model_validate(d) for d in decisions]
+    chat_id: int, decision_service: DecisionServiceDep
+) -> list[DecisionDTO]:
+    return decision_service.get_cached(DecisionTarget.CHAT, chat_id)
 
 
-@router.post("/custom")
+@router.post("/custom", summary="Evaluate an ad-hoc question set")
 def evaluate_custom(
-    req: CustomDecisionRequest,
-    decision_service: DecisionService = Depends(get_decision_service),
-):
-    """Runs ad-hoc inference with Laya given an arbitrary state and typed questions schema."""
-    try:
-        return decision_service.evaluate_custom(state=req.state, questions=req.questions)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Laya inference error: {str(e)}",
-        )
+    request: CustomDecisionRequest, decision_service: DecisionServiceDep
+) -> dict[str, Any]:
+    """Answers arbitrary typed questions about arbitrary state, without caching."""
+    questions = DecisionQuestion.many_from_mapping(request.questions)
+    return decision_service.evaluate_custom(request.state, questions)
