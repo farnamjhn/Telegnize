@@ -64,7 +64,13 @@ class Container:
 
     @cached_property
     def message_repository(self) -> IMessageRepository:
-        return SQLiteMessageRepository(self.database)
+        return SQLiteMessageRepository(
+            self.database,
+            reply_window_seconds=self.settings.reply_window_seconds,
+            turn_window_seconds=self.settings.turn_window_seconds,
+            session_gap_seconds=self.settings.session_gap_seconds,
+            uptake_window_seconds=self.settings.uptake_window_seconds,
+        )
 
     @cached_property
     def decision_repository(self) -> IDecisionRepository:

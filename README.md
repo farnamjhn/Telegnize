@@ -38,7 +38,7 @@ curl localhost:8000/api/analytics/1
 | `GET` | `/api/chats` | List imported chats |
 | `GET` `DELETE` | `/api/chats/{id}` | Read or delete one chat |
 | `GET` `POST` | `/api/messages` | Query messages, or store one |
-| `GET` | `/api/analytics/{chat_id}` | Behavioural profile of a chat |
+| `GET` | `/api/analytics/{chat_id}` | [Behavioural profile](docs/analytics.md) of a chat |
 | `POST` `GET` | `/api/decisions/messages/{id}` | Evaluate a message, or read the cache |
 | `POST` `GET` | `/api/decisions/chats/{id}` | Evaluate a conversation window |
 | `POST` | `/api/decisions/custom` | Ask arbitrary typed questions |
@@ -63,6 +63,17 @@ See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for the design rules and
 [docs/architecture.md](docs/architecture.md) for how a request flows through
 the system.
 
+## Analytics
+
+Alongside volume and timing, Telegnize reports per participant how readily they
+answer, who opens and closes conversations, how they hold the floor, and what
+their wording carries — and chat-wide, the rhythm of sittings and silences and
+how evenly the conversation is shared.
+
+These are observations about a transcript, not measurements of a relationship.
+[docs/analytics.md](docs/analytics.md) sets out what each figure means, what it
+cannot tell you, and how to tune the thresholds behind it.
+
 ## Configuration
 
 Every setting is an environment variable prefixed `TELEGNIZE_`:
@@ -75,6 +86,10 @@ Every setting is an environment variable prefixed `TELEGNIZE_`:
 | `TELEGNIZE_LOG_LEVEL` | `INFO` | Root log level |
 | `TELEGNIZE_INGEST_BATCH_SIZE` | `500` | Messages per insert transaction |
 | `TELEGNIZE_MAX_PAGE_SIZE` | `1000` | Ceiling on a list request |
+| `TELEGNIZE_REPLY_WINDOW_SECONDS` | `86400` | Gap still counted as answering a reply |
+| `TELEGNIZE_TURN_WINDOW_SECONDS` | `21600` | Gap still counted as answering a turn |
+| `TELEGNIZE_SESSION_GAP_SECONDS` | `21600` | Silence that starts a new session |
+| `TELEGNIZE_UPTAKE_WINDOW_SECONDS` | `3600` | How long a question stays live |
 | `TELEGNIZE_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated browser origins |
 | `TELEGNIZE_PRELOAD_DECISION_ENGINE` | `0` | `1` loads model weights at startup |
 
