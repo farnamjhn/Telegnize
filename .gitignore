@@ -11,3 +11,9 @@ wheels/
 
 # Pycharm
 .idea
+
+# macOS
+.DS_Store
+
+# Local runtime data
+identifier.sqlite
