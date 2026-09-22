@@ -1,1 +1,1 @@
-"""Telegnize API Routers package."""
+"""HTTP routers, one per resource."""

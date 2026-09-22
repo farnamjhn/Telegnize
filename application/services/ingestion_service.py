@@ -1,67 +1,83 @@
-from pathlib import Path
-from typing import Any, BinaryIO, Dict, Optional, Union
+"""Imports Telegram exports into storage."""
 
-from application.dtos.chat_dto import ChatDTO
+import logging
+
+from application.dtos.chat_dto import ChatDTO, ImportSummaryDTO
+from application.ports.export_reader import (
+    DEFAULT_BATCH_SIZE,
+    ExportFormatError,
+    FileSource,
+    IExportReader,
+)
+from domain.errors import InvalidExportError
 from domain.models.chat import Chat
 from domain.repository.chat_repository import IChatRepository
 from domain.repository.message_repository import IMessageRepository
-from infrastructure.parser.telegram_parser import TelegramJsonParser
+
+logger = logging.getLogger(__name__)
 
 
 class IngestionService:
-    """Orchestrates streaming ingestion of Telegram JSON exports using ijson and NLP normalizers."""
+    """Streams an export into the database one batch at a time.
+
+    Memory use is bounded by ``batch_size`` regardless of how large the export
+    is, so a multi-gigabyte file imports in the same footprint as a small one.
+    """
 
     def __init__(
         self,
         chat_repo: IChatRepository,
         message_repo: IMessageRepository,
-        parser: Optional[TelegramJsonParser] = None,
-    ):
-        self.chat_repo = chat_repo
-        self.message_repo = message_repo
-        self.parser = parser or TelegramJsonParser()
+        reader: IExportReader,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+    ) -> None:
+        self._chats = chat_repo
+        self._messages = message_repo
+        self._reader = reader
+        self._batch_size = batch_size
 
     def ingest_export(
         self,
-        file_input: Union[str, Path, BinaryIO],
-        override_name: Optional[str] = None,
-        batch_size: int = 500,
-    ) -> Dict[str, Any]:
-        """Streams, normalizes, and persists a Telegram chat export."""
-        # 1. Extract chat metadata without loading full file
-        meta = self.parser.extract_chat_metadata(file_input)
-        telegram_chat_id = meta.get("id", 0)
-        chat_name = override_name or meta.get("name", "Imported Chat")
-        chat_type = meta.get("type", "personal_chat")
+        source: FileSource,
+        override_name: str | None = None,
+        batch_size: int | None = None,
+    ) -> ImportSummaryDTO:
+        """Imports one export and returns what was written.
 
-        # 2. Persist or retrieve Chat record
-        chat = Chat(
-            id=0,
-            telegram_chat_id=telegram_chat_id,
-            name=chat_name,
-            type=chat_type,
-            total_messages=0,
+        Raises:
+            InvalidExportError: if the file is not readable Telegram JSON.
+        """
+        try:
+            metadata = self._reader.extract_metadata(source)
+        except ExportFormatError as error:
+            raise InvalidExportError(str(error)) from error
+
+        chat = self._chats.save(
+            Chat(
+                id=0,
+                telegram_chat_id=metadata.telegram_chat_id,
+                name=override_name or metadata.name,
+                type=metadata.type,
+            )
         )
-        saved_chat = self.chat_repo.save(chat)
 
-        # 3. Stream messages in batches
-        # If file_input is a stream, seek(0) if supported
-        if hasattr(file_input, "seek"):
-            try:
-                file_input.seek(0)
-            except Exception:
-                pass
+        total = 0
+        try:
+            batches = self._reader.stream_messages(
+                source,
+                chat_id=chat.id,
+                batch_size=batch_size or self._batch_size,
+            )
+            for batch in batches:
+                total += self._messages.save_batch(batch)
+        except ExportFormatError as error:
+            raise InvalidExportError(str(error)) from error
 
-        total_imported = 0
-        for batch in self.parser.stream_messages(file_input, chat_id=saved_chat.id, batch_size=batch_size):
-            self.message_repo.save_batch(batch)
-            total_imported += len(batch)
+        # The export is the source of truth for the chat's size, so recount
+        # rather than adding to whatever a previous import left behind.
+        total_in_chat = self._messages.count_by_chat(chat.id)
+        self._chats.update_message_count(chat.id, total_in_chat)
+        chat.total_messages = total_in_chat
 
-        # 4. Update total message count on chat
-        self.chat_repo.update_message_count(saved_chat.id, total_imported)
-        saved_chat.total_messages = total_imported
-
-        return {
-            "chat": ChatDTO.from_domain(saved_chat),
-            "total_messages": total_imported,
-        }
+        logger.info("Imported %d messages into chat %s.", total, chat.id)
+        return ImportSummaryDTO(chat=ChatDTO.from_domain(chat), total_messages=total)

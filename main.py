@@ -1,10 +1,20 @@
+"""Entry point for running the Telegnize API with uvicorn."""
+
 import uvicorn
-from infrastructure.api.controllers import app
+
+from infrastructure.api.app import app, configure_logging  # noqa: F401
+from infrastructure.config import Settings
 
 
-def main():
-    print("Starting Telegnize API Server on http://0.0.0.0:8000...")
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+def main() -> None:
+    settings = Settings()
+    configure_logging(settings)
+    uvicorn.run(
+        "infrastructure.api.app:app",
+        host=settings.host,
+        port=settings.port,
+        log_level=settings.log_level.lower(),
+    )
 
 
 if __name__ == "__main__":

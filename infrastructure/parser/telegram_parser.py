@@ -1,249 +1,263 @@
-import io
+"""Streaming parser for Telegram's JSON chat exports.
+
+Exports routinely run to hundreds of megabytes, so messages are pulled off the
+file with ``ijson`` one at a time and handed on in batches; the whole document
+is never held in memory.
+"""
+
 import json
+import logging
+from collections.abc import Iterator, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any, BinaryIO, Dict, Generator, List, Optional, Union
+from typing import Any, BinaryIO
 
 import ijson
 
-from domain.models.message import ContentType, Message, MessageId
+from application.ports.export_reader import (
+    DEFAULT_BATCH_SIZE,
+    ChatMetadata,
+    ExportFormatError,
+    FileSource,
+    IExportReader,
+)
+from domain.models.message import ContentType, Message
 from infrastructure.nlp.normalizer import TextNormalizer, get_normalizer
 
+logger = logging.getLogger(__name__)
 
-class TelegramJsonParser:
-    """Parses Telegram exported JSONs into Message entity with streaming support and NLP normalization."""
+_TIMESTAMP_FORMATS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S")
 
-    def __init__(self, normalizer: Optional[TextNormalizer] = None):
-        self.normalizer = normalizer or get_normalizer()
+# Telegram's media_type values, mapped onto the content types Telegnize keeps.
+_MEDIA_TYPES: dict[str, ContentType] = {
+    "voice_message": ContentType.VOICE,
+    "sticker": ContentType.STICKER,
+    "photo": ContentType.PHOTO,
+    "document": ContentType.DOCUMENT,
+    "video_file": ContentType.DOCUMENT,
+    "video_message": ContentType.DOCUMENT,
+    "animation": ContentType.DOCUMENT,
+    "audio_file": ContentType.DOCUMENT,
+}
 
-    def parse_message_dict(self, msg_dict: Dict[str, Any], chat_id: int = 1) -> Optional[Message]:
-        """Parses a single Telegram message dictionary into a domain Message entity."""
-        if not isinstance(msg_dict, dict):
+
+class TelegramJsonParser(IExportReader):
+    """Turns Telegram export JSON into domain :class:`Message` entities."""
+
+    def __init__(self, normalizer: TextNormalizer | None = None) -> None:
+        self._normalizer = normalizer or get_normalizer()
+
+    @property
+    def normalizer(self) -> TextNormalizer:
+        return self._normalizer
+
+    # --- single messages --------------------------------------------------
+    def parse_message(self, payload: dict[str, Any], chat_id: int = 1) -> Message | None:
+        """Parses one exported message, or returns None if it is not one.
+
+        Service entries (joins, title changes), malformed ids, and messages
+        without a usable timestamp are skipped rather than guessed at.
+        """
+        if not isinstance(payload, dict) or payload.get("type") != "message":
             return None
 
-        # Skip service messages or non-message entries
-        if msg_dict.get("type") != "message":
+        telegram_msg_id = _as_int(payload.get("id"))
+        if telegram_msg_id is None:
+            logger.debug("Skipping message with unusable id: %r", payload.get("id"))
             return None
 
-        if "id" not in msg_dict:
+        timestamp = self._parse_timestamp(payload)
+        if timestamp is None:
+            logger.debug("Skipping message %s with no parsable date.", telegram_msg_id)
             return None
 
-        try:
-            telegram_msg_id = int(msg_dict["id"])
-        except (ValueError, TypeError):
-            return None
-
-        # Sender ID extraction
-        from_id = msg_dict.get("from_id")
-        if from_id is not None:
-            sender_id = str(from_id)
-        else:
-            sender_id = str(msg_dict.get("actor_id", msg_dict.get("from", "unknown")))
-
-        sender_name = str(msg_dict.get("from", msg_dict.get("actor", "Unknown")))
-
-        # Reply to message ID handling
-        raw_reply_id = msg_dict.get("reply_to_message_id", msg_dict.get("reply_to_msg_id"))
-        if raw_reply_id is not None:
-            try:
-                reply_to_msg_id = int(raw_reply_id)
-                reply_to_id = MessageId(reply_to_msg_id)
-            except (ValueError, TypeError):
-                reply_to_msg_id = None
-                reply_to_id = None
-        else:
-            reply_to_msg_id = None
-            reply_to_id = None
-
-        # Timestamp parsing
-        timestamp = self._parse_timestamp(msg_dict)
-
-        # Raw text extraction
-        raw_text = self._extract_text(msg_dict.get("text", ""))
-
-        # Multilingual NLP normalization (Hazm for Persian, NLTK/Regex for English)
-        normalized_text, language = self.normalizer.normalize(raw_text)
-
-        # Content type determination
-        content_type = self._determine_content_type(msg_dict)
-
-        # Forwarded status
-        is_forwarded = bool(
-            msg_dict.get("forwarded_from")
-            or msg_dict.get("forwarded_from_id")
-            or msg_dict.get("is_forwarded", False)
-        )
+        text = self._extract_text(payload.get("text", ""))
+        normalized_text, language = self._normalizer.normalize(text)
 
         return Message(
             id=0,
-            telegram_msg_id=telegram_msg_id,
-            sender_id=sender_id,
-            sender_name=sender_name,
-            reply_to_msg_id=reply_to_msg_id,
-            timestamp=timestamp,
-            text=raw_text,
-            content_type=content_type,
-            reply_to_id=reply_to_id,
-            is_forwarded=is_forwarded,
             chat_id=chat_id,
-            raw_text=raw_text,
+            telegram_msg_id=telegram_msg_id,
+            sender_id=self._extract_sender_id(payload),
+            sender_name=str(payload.get("from") or payload.get("actor") or "Unknown"),
+            timestamp=timestamp,
+            text=text,
             normalized_text=normalized_text,
             language=language,
+            content_type=self._content_type(payload),
+            reply_to_msg_id=_as_int(
+                payload.get("reply_to_message_id", payload.get("reply_to_msg_id"))
+            ),
+            is_forwarded=bool(
+                payload.get("forwarded_from")
+                or payload.get("forwarded_from_id")
+                or payload.get("is_forwarded")
+            ),
         )
 
+    # --- whole documents (small inputs only) ------------------------------
     def parse_data(
         self,
-        data: Union[Dict[str, Any], List[Dict[str, Any]]],
+        data: dict[str, Any] | Sequence[dict[str, Any]],
         chat_id: int = 1,
-    ) -> List[Message]:
-        """Parses a dictionary or list containing Telegram exported JSON data."""
+    ) -> list[Message]:
+        """Parses an already-decoded export.
+
+        Only for payloads small enough to hold in memory; use
+        :meth:`stream_messages` for files.
+        """
         if isinstance(data, dict):
-            messages_raw = data.get("messages", [data])
-        elif isinstance(data, list):
-            messages_raw = data
+            raw_messages = data.get("messages", [data])
+        elif isinstance(data, (list, tuple)):
+            raw_messages = data
         else:
-            raise ValueError("Input data must be a dict or list.")
+            raise ValueError("Export data must be a mapping or a sequence.")
 
-        parsed_messages: List[Message] = []
-        for msg_dict in messages_raw:
-            msg = self.parse_message_dict(msg_dict, chat_id=chat_id)
-            if msg is not None:
-                parsed_messages.append(msg)
+        parsed = (self.parse_message(item, chat_id) for item in raw_messages)
+        return [message for message in parsed if message is not None]
 
-        return parsed_messages
+    def parse_json(self, json_str: str, chat_id: int = 1) -> list[Message]:
+        return self.parse_data(json.loads(json_str), chat_id=chat_id)
 
-    def parse_json(self, json_str: str, chat_id: int = 1) -> List[Message]:
-        """Parses a JSON string into Message entities."""
-        data = json.loads(json_str)
-        return self.parse_data(data, chat_id=chat_id)
+    def parse_file(self, path: str | Path, chat_id: int = 1) -> list[Message]:
+        """Reads a whole export into memory; prefer :meth:`stream_messages`."""
+        with open(path, encoding="utf-8") as handle:
+            return self.parse_data(json.load(handle), chat_id=chat_id)
 
-    def parse_file(self, file_path: Union[str, Path], chat_id: int = 1) -> List[Message]:
-        """Parses a Telegram export JSON file into Message entities."""
-        path = Path(file_path)
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return self.parse_data(data, chat_id=chat_id)
-
-    def extract_chat_metadata(
-        self, file_input: Union[str, Path, BinaryIO]
-    ) -> Dict[str, Any]:
-        """Extracts top-level chat metadata without parsing the entire file."""
-        if isinstance(file_input, (str, Path)):
-            with open(file_input, "rb") as f:
-                return self._extract_meta_from_stream(f)
-        else:
-            return self._extract_meta_from_stream(file_input)
-
-    def _extract_meta_from_stream(self, stream: BinaryIO) -> Dict[str, Any]:
-        meta: Dict[str, Any] = {
-            "name": "Exported Chat",
-            "type": "personal_chat",
-            "id": 0,
-        }
-        try:
-            parser = ijson.parse(stream)
-            for prefix, event, value in parser:
-                if prefix == "name" and event == "string":
-                    meta["name"] = value
-                elif prefix == "type" and event == "string":
-                    meta["type"] = value
-                elif prefix == "id" and event == "number":
-                    meta["id"] = int(value)
-                elif prefix == "messages.item":
-                    break
-        except Exception:
-            pass
-        return meta
+    # --- streaming --------------------------------------------------------
+    def extract_metadata(self, source: FileSource) -> ChatMetadata:
+        """Reads the export header without touching the message array."""
+        with _as_binary_stream(source) as stream:
+            fields: dict[str, Any] = {}
+            try:
+                for prefix, event, value in ijson.parse(stream):
+                    if prefix == "messages":
+                        break
+                    if prefix in ("name", "type") and event == "string":
+                        fields[prefix] = value
+                    elif prefix == "id" and event == "number":
+                        fields["telegram_chat_id"] = int(value)
+            except ijson.JSONError as error:
+                raise ExportFormatError(
+                    f"Not a readable Telegram export: {error}"
+                ) from error
+        return ChatMetadata(**fields)
 
     def stream_messages(
         self,
-        file_input: Union[str, Path, BinaryIO],
+        source: FileSource,
         chat_id: int = 1,
-        batch_size: int = 500,
-    ) -> Generator[List[Message], None, None]:
-        """Streams messages in batches using ijson to conserve memory."""
-        if isinstance(file_input, (str, Path)):
-            with open(file_input, "rb") as f:
-                yield from self._stream_from_file_object(f, chat_id=chat_id, batch_size=batch_size)
-        else:
-            yield from self._stream_from_file_object(file_input, chat_id=chat_id, batch_size=batch_size)
+        batch_size: int = DEFAULT_BATCH_SIZE,
+    ) -> Iterator[list[Message]]:
+        """Yields batches of parsed messages, holding one batch at a time."""
+        if batch_size < 1:
+            raise ValueError("batch_size must be at least 1.")
 
-    def _stream_from_file_object(
-        self,
-        stream: BinaryIO,
-        chat_id: int = 1,
-        batch_size: int = 500,
-    ) -> Generator[List[Message], None, None]:
-        items = ijson.items(stream, "messages.item")
-        batch: List[Message] = []
-
-        for item in items:
-            msg = self.parse_message_dict(item, chat_id=chat_id)
-            if msg is not None:
-                batch.append(msg)
-                if len(batch) >= batch_size:
-                    yield batch
-                    batch = []
-
-        if batch:
-            yield batch
-
-    def _extract_text(self, text_val: Any) -> str:
-        """Extracts plain text from Telegram text field (str, list of entity dicts, or None)."""
-        if isinstance(text_val, str):
-            return text_val
-        elif isinstance(text_val, list):
-            parts = []
-            for part in text_val:
-                if isinstance(part, str):
-                    parts.append(part)
-                elif isinstance(part, dict):
-                    parts.append(str(part.get("text", "")))
-            return "".join(parts)
-        elif text_val is None:
-            return ""
-        return str(text_val)
-
-    def _parse_timestamp(self, msg_dict: Dict[str, Any]) -> datetime:
-        """Parses timestamp from 'date' string or 'date_unixtime' integer."""
-        date_str = msg_dict.get("date")
-        if date_str and isinstance(date_str, str):
+        with _as_binary_stream(source) as stream:
+            batch: list[Message] = []
             try:
-                return datetime.fromisoformat(date_str)
+                for item in ijson.items(stream, "messages.item"):
+                    message = self.parse_message(item, chat_id=chat_id)
+                    if message is None:
+                        continue
+                    batch.append(message)
+                    if len(batch) >= batch_size:
+                        yield batch
+                        batch = []
+            except ijson.JSONError as error:
+                raise ExportFormatError(f"Malformed Telegram export: {error}") from error
+            if batch:
+                yield batch
+
+    # --- field extraction -------------------------------------------------
+    @staticmethod
+    def _extract_sender_id(payload: dict[str, Any]) -> str:
+        for key in ("from_id", "actor_id", "from"):
+            value = payload.get(key)
+            if value is not None:
+                return str(value)
+        return "unknown"
+
+    @staticmethod
+    def _extract_text(value: Any) -> str:
+        """Flattens Telegram's text field, which may be a string or entity list."""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            return "".join(
+                part if isinstance(part, str) else str(part.get("text", ""))
+                for part in value
+                if isinstance(part, (str, dict))
+            )
+        return "" if value is None else str(value)
+
+    @staticmethod
+    def _parse_timestamp(payload: dict[str, Any]) -> datetime | None:
+        """Reads ``date``, falling back to ``date_unixtime``.
+
+        ``date`` is preferred because it is the local wall-clock time the
+        conversation actually happened in, which is what hour-of-day analytics
+        is about; ``date_unixtime`` is UTC and would shift those buckets.
+        """
+        raw_date = payload.get("date")
+        if isinstance(raw_date, str) and raw_date:
+            try:
+                return datetime.fromisoformat(raw_date)
             except ValueError:
                 pass
-            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+            for fmt in _TIMESTAMP_FORMATS:
                 try:
-                    return datetime.strptime(date_str, fmt)
+                    return datetime.strptime(raw_date, fmt)
                 except ValueError:
-                    pass
+                    continue
 
-        unixtime = msg_dict.get("date_unixtime")
+        unixtime = _as_int(payload.get("date_unixtime"))
         if unixtime is not None:
-            try:
-                return datetime.fromtimestamp(int(unixtime))
-            except (ValueError, TypeError):
-                pass
+            return datetime.fromtimestamp(unixtime)
+        return None
 
-        return datetime.now()
-
-    def _determine_content_type(self, msg_dict: Dict[str, Any]) -> ContentType:
-        """Determines ContentType from Telegram message fields."""
-        media_type = msg_dict.get("media_type")
-
-        if media_type == "voice_message":
-            return ContentType.VOICE
-
-        if media_type == "sticker" or "sticker_emoji" in msg_dict:
+    @staticmethod
+    def _content_type(payload: dict[str, Any]) -> ContentType:
+        media_type = payload.get("media_type")
+        if media_type in _MEDIA_TYPES:
+            return _MEDIA_TYPES[media_type]
+        if "sticker_emoji" in payload:
             return ContentType.STICKER
-
-        if "photo" in msg_dict or media_type == "photo":
+        if "photo" in payload:
             return ContentType.PHOTO
-
-        if (
-            media_type in ("document", "video_file", "animation", "audio_file", "video_message")
-            or "file" in msg_dict
-        ):
+        if "file" in payload:
             return ContentType.DOCUMENT
-
         return ContentType.TEXT
+
+
+def _as_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+class _as_binary_stream:
+    """Opens ``source`` for binary reading, rewinding streams given to us.
+
+    Closes the file only if it was opened here, so a caller's upload stream
+    stays usable afterwards.
+    """
+
+    def __init__(self, source: FileSource) -> None:
+        self._source = source
+        self._opened: BinaryIO | None = None
+
+    def __enter__(self) -> BinaryIO:
+        if isinstance(self._source, (str, Path)):
+            self._opened = open(self._source, "rb")
+            return self._opened
+        stream = self._source
+        if hasattr(stream, "seek") and getattr(stream, "seekable", lambda: False)():
+            stream.seek(0)
+        return stream
+
+    def __exit__(self, *exc_info) -> None:
+        if self._opened is not None:
+            self._opened.close()
+            self._opened = None

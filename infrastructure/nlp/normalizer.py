@@ -1,105 +1,110 @@
+"""Multilingual text normalization.
+
+Persian goes through ``hazm`` (ZWNJ/half-space handling, Arabic-to-Persian
+character harmonisation); everything else goes through case folding and shared
+regex cleanup. The normalizer is stateless apart from the compiled patterns and
+the hazm instance, which is why a single shared instance is enough.
+"""
+
 import re
-from typing import Optional, Tuple
+
 import hazm
-import nltk
+
+from application.ports.text_normalizer import ITextNormalizer
+from domain.models.language import Language
+
+_PERSIAN_SCRIPT = re.compile(r"[؀-ۿﭐ-﷿ﹰ-﻿]")
+_LATIN_SCRIPT = re.compile(r"[a-zA-Z]")
+_WHITESPACE = re.compile(r"\s+")
+_REPEATED_CHARS = re.compile(r"(.)\1{2,}")
+_WORDS = re.compile(r"\w+", re.UNICODE)
+
+#: A script is treated as dominant when it outnumbers the other this many times.
+_DOMINANCE_RATIO = 2
+
+#: Question marks recognised across supported languages.
+QUESTION_MARKS = ("?", "؟")
 
 
-class TextNormalizer:
-    """Multilingual text normalization engine using Hazm (Persian), NLTK (English), and Regex."""
+class TextNormalizer(ITextNormalizer):
+    """Normalizes message text and reports the script it is written in."""
 
-    _instance: Optional["TextNormalizer"] = None
+    def __init__(self) -> None:
+        self._hazm = hazm.Normalizer()
 
-    def __init__(self):
-        self._hazm_normalizer = hazm.Normalizer()
-        # Regex patterns
-        self._persian_pattern = re.compile(r"[\u0600-\u06FF\uFB50-\uFDFF\uFE70-\uFEFF]")
-        self._latin_pattern = re.compile(r"[a-zA-Z]")
-        self._url_pattern = re.compile(r"https?://\S+|www\.\S+")
-        self._whitespace_pattern = re.compile(r"\s+")
-        self._repeated_chars_pattern = re.compile(r"(.)\1{2,}")
-
-    @classmethod
-    def get_instance(cls) -> "TextNormalizer":
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-
-    def detect_language(self, text: str) -> str:
-        """Detects language script of text: 'fa', 'en', 'mixed', or 'other'."""
+    # --- detection --------------------------------------------------------
+    def detect_language(self, text: str) -> Language:
+        """Classifies text by the script it is dominantly written in."""
         if not text or not text.strip():
-            return "unknown"
+            return Language.UNKNOWN
 
-        persian_count = len(self._persian_pattern.findall(text))
-        latin_count = len(self._latin_pattern.findall(text))
+        persian = len(_PERSIAN_SCRIPT.findall(text))
+        latin = len(_LATIN_SCRIPT.findall(text))
 
-        if persian_count > 0 and latin_count > 0:
-            if persian_count > latin_count * 2:
-                return "fa"
-            elif latin_count > persian_count * 2:
-                return "en"
-            return "mixed"
-        elif persian_count > 0:
-            return "fa"
-        elif latin_count > 0:
-            return "en"
-        return "other"
+        if persian and latin:
+            if persian > latin * _DOMINANCE_RATIO:
+                return Language.PERSIAN
+            if latin > persian * _DOMINANCE_RATIO:
+                return Language.ENGLISH
+            return Language.MIXED
+        if persian:
+            return Language.PERSIAN
+        if latin:
+            return Language.ENGLISH
+        return Language.OTHER
 
-    def clean_general(self, text: str) -> str:
-        """Performs general regex cleaning (whitespace, repeated punctuation)."""
+    # --- normalization ----------------------------------------------------
+    def clean(self, text: str) -> str:
+        """Collapses whitespace and runs of three or more repeated characters."""
         if not text:
             return ""
-        # Collapse multiple spaces and linebreaks to single space
-        cleaned = self._whitespace_pattern.sub(" ", text).strip()
-        # Collapse 3+ repeated characters to at most 2 (e.g. "سللللام" -> "سلام")
-        cleaned = self._repeated_chars_pattern.sub(r"\1\1", cleaned)
-        return cleaned
+        collapsed = _WHITESPACE.sub(" ", text).strip()
+        return _REPEATED_CHARS.sub(r"\1\1", collapsed)
 
     def normalize_persian(self, text: str) -> str:
-        """Normalizes Persian text using Hazm and custom character refinements."""
-        if not text:
-            return ""
-        # Hazm handles ZWNJ (half-space), Yeh/Kaf harmonization, and basic formatting
-        hazm_normalized = self._hazm_normalizer.normalize(text)
-        return self.clean_general(hazm_normalized)
+        return self.clean(self._hazm.normalize(text)) if text else ""
 
     def normalize_english(self, text: str) -> str:
-        """Normalizes English text using lowercase and general cleanup."""
-        if not text:
-            return ""
-        cleaned = text.lower()
-        return self.clean_general(cleaned)
+        return self.clean(text.lower()) if text else ""
 
-    def normalize(self, text: str) -> Tuple[str, str]:
-        """Detects language and returns (normalized_text, detected_language)."""
+    def normalize(self, text: str) -> tuple[str, Language]:
+        """Returns the normalized text and the language it was detected as."""
         if not text or not text.strip():
-            return "", "unknown"
+            return "", Language.UNKNOWN
 
-        lang = self.detect_language(text)
+        language = self.detect_language(text)
+        if language is Language.PERSIAN:
+            return self.normalize_persian(text), language
+        if language is Language.ENGLISH:
+            return self.normalize_english(text), language
+        if language is Language.MIXED:
+            # hazm fixes Persian glyphs and leaves Latin runs intact, so it is
+            # safe to apply to mixed text; case is left alone to keep the two
+            # halves consistent with each other.
+            return self.clean(self._hazm.normalize(text)), language
+        return self.clean(text), language
 
-        if lang == "fa":
-            norm_text = self.normalize_persian(text)
-        elif lang == "en":
-            norm_text = self.normalize_english(text)
-        elif lang == "mixed":
-            # For mixed, apply Hazm first (as it preserves English while fixing Persian glyphs), then general cleanup
-            norm_text = self.clean_general(self._hazm_normalizer.normalize(text))
-        else:
-            norm_text = self.clean_general(text)
+    # --- metrics ----------------------------------------------------------
+    @staticmethod
+    def word_count(text: str) -> int:
+        """Counts words, treating Persian and Latin word characters alike."""
+        return len(_WORDS.findall(text)) if text else 0
 
-        return norm_text, lang
+    @staticmethod
+    def is_question(text: str) -> bool:
+        """Whether the text carries an ASCII or Persian question mark."""
+        return bool(text) and any(mark in text for mark in QUESTION_MARKS)
 
-    def word_count(self, text: str) -> int:
-        """Counts words using unicode-aware regex."""
-        if not text:
-            return 0
-        return len(re.findall(r"[\w]+", text))
 
-    def is_question(self, text: str) -> bool:
-        """Checks if text contains English '?' or Persian '؟'."""
-        if not text:
-            return False
-        return "?" in text or "؟" in text
+_shared_normalizer: TextNormalizer | None = None
 
 
 def get_normalizer() -> TextNormalizer:
-    return TextNormalizer.get_instance()
+    """Returns the process-wide normalizer, building it on first use.
+
+    ``hazm.Normalizer()`` loads word lists, so it is built once and reused.
+    """
+    global _shared_normalizer
+    if _shared_normalizer is None:
+        _shared_normalizer = TextNormalizer()
+    return _shared_normalizer

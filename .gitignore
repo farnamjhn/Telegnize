@@ -9,11 +9,20 @@ wheels/
 # Virtual environments
 .venv
 
-# Pycharm
+# Editors
 .idea
+.vscode
 
 # macOS
 .DS_Store
 
 # Local runtime data
-identifier.sqlite
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+temp_test_db/
+
+# Chat exports — never commit a real conversation
+example.json
+*.export.json

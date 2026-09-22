@@ -1,26 +1,29 @@
-from dataclasses import dataclass
+"""Chat-shaped payloads."""
+
 from datetime import datetime
-from typing import Optional
+
+from pydantic import BaseModel, ConfigDict
 
 from domain.models.chat import Chat
 
 
-@dataclass
-class ChatDTO:
+class ChatDTO(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     telegram_chat_id: int
     name: str
     type: str
     total_messages: int
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
 
     @classmethod
     def from_domain(cls, chat: Chat) -> "ChatDTO":
-        return cls(
-            id=chat.id,
-            telegram_chat_id=chat.telegram_chat_id,
-            name=chat.name,
-            type=chat.type,
-            total_messages=chat.total_messages,
-            created_at=chat.created_at,
-        )
+        return cls.model_validate(chat)
+
+
+class ImportSummaryDTO(BaseModel):
+    """What an ingestion run produced."""
+
+    chat: ChatDTO
+    total_messages: int

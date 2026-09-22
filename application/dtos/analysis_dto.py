@@ -1,10 +1,21 @@
-from dataclasses import dataclass, field
+"""Analytics- and decision-shaped payloads."""
+
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict
+
+from domain.models.analysis import (
+    ChatAnalytics,
+    Decision,
+    DecisionTarget,
+    DecisionType,
+)
 
 
-@dataclass
-class ParticipantStatsDTO:
+class ParticipantStatsDTO(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     sender_id: str
     sender_name: str
     message_count: int
@@ -14,30 +25,41 @@ class ParticipantStatsDTO:
     cold_closure_count: int
     avg_words_per_message: float
     message_share_percent: float
-    avg_response_time_seconds: Optional[float] = None
+    avg_response_time_seconds: float | None = None
+    median_response_time_seconds: float | None = None
 
 
-@dataclass
-class ChatAnalyticsDTO:
+class ChatAnalyticsDTO(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     chat_id: int
     chat_name: str
     total_messages: int
-    date_range_start: Optional[datetime]
-    date_range_end: Optional[datetime]
-    participants: List[ParticipantStatsDTO]
-    hourly_distribution: Dict[int, int]
-    daily_distribution: Dict[str, int]
-    language_breakdown: Dict[str, int]
-    avg_response_time_seconds: Optional[float] = None
+    date_range_start: datetime | None = None
+    date_range_end: datetime | None = None
+    participants: list[ParticipantStatsDTO] = []
+    hourly_distribution: dict[int, int] = {}
+    daily_distribution: dict[str, int] = {}
+    language_breakdown: dict[str, int] = {}
+    avg_response_time_seconds: float | None = None
+
+    @classmethod
+    def from_domain(cls, analytics: ChatAnalytics) -> "ChatAnalyticsDTO":
+        return cls.model_validate(analytics)
 
 
-@dataclass
-class LayaDecisionDTO:
-    target_type: str
+class DecisionDTO(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    target_type: DecisionTarget
     target_id: int
     question_key: str
-    decision_type: str
+    decision_type: DecisionType
     result_value: Any
     confidence: float
-    probabilities: Dict[str, float] = field(default_factory=dict)
-    created_at: Optional[datetime] = None
+    probabilities: dict[str, float] = {}
+    created_at: datetime | None = None
+
+    @classmethod
+    def from_domain(cls, decision: Decision) -> "DecisionDTO":
+        return cls.model_validate(decision)
