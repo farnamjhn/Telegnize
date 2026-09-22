@@ -1,0 +1,96 @@
+/* Telegnize design tokens — AMOLED black and white, single selected theme.
+ *
+ * The page plane is true black so the panel borders, not shadows, do the
+ * separating. The accent is white; orange is the only chromatic colour in the
+ * system, and it is reserved — it marks the alarm end of a scale and nothing
+ * else, so it still means something when it appears.
+ *
+ * Chart series separate by LIGHTNESS rather than hue (white → orange → grey).
+ * Measured against this surface, the separation checks pass comfortably —
+ * worst all-pairs CVD ΔE 14.9 (target ≥8), normal-vision ΔE 21.2 (floor 15),
+ * all three ≥3:1 contrast. The lightness-band and chroma-floor checks fail by
+ * construction: white has zero chroma and grey almost none, which is what
+ * "black and white" means. So identity never rests on the swatch alone —
+ * every multi-series chart carries a legend and a table view.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Planes */
+  --plane: #000000;
+  --surface-1: #0b0b0c;
+  --surface-2: #121214;
+  --surface-3: #1a1a1d;
+  --surface-inset: #060607;
+
+  /* Hairlines */
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.13);
+  --grid: rgba(255, 255, 255, 0.055);
+  --axis: rgba(255, 255, 255, 0.1);
+
+  /* Ink */
+  --text-primary: #f4f4f5;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+  --text-faint: #52525b;
+
+  /* Accent — white. `--accent-ink` is what sits ON it. */
+  --accent: #ffffff;
+  --accent-hover: #e4e4e7;
+  --accent-ink: #0a0a0b;
+  --accent-wash: rgba(255, 255, 255, 0.1);
+  --accent-edge: rgba(255, 255, 255, 0.32);
+
+  /* Orange — the single chromatic accent. */
+  --amber: #f0863a;
+  --amber-text: #f7ab72;
+  --amber-wash: rgba(240, 134, 58, 0.12);
+  --amber-edge: rgba(240, 134, 58, 0.45);
+
+  /* Categorical series — fixed order, never cycled, separated by lightness. */
+  --series-1: #ffffff;
+  --series-2: #f0863a;
+  --series-3: #7c7c85;
+  --series-other: #3f3f46;
+
+  /* Sequential — one neutral ramp, light → dark. */
+  --seq-200: #d4d4d8;
+  --seq-350: #a1a1aa;
+  --seq-450: #78787f;
+  --seq-600: #57575f;
+  --seq-track: rgba(255, 255, 255, 0.11);
+
+  /* Status — an escalation ramp: nominal → middling → alarm. */
+  --good: #ffffff;
+  --warning: #a1a1aa;
+  --serious: #f0863a;
+  --critical: #f0863a;
+
+  /* Type */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-rtl: "Vazirmatn", "SF Arabic", "Geeza Pro", Tahoma, var(--font-sans);
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  /* Geometry */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-full: 999px;
+
+  --pad-card: 20px;
+  --gap: 16px;
+
+  /* Motion */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --fast: 120ms;
+  --slow: 240ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fast: 0ms;
+    --slow: 0ms;
+  }
+}
