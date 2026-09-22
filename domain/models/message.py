@@ -2,8 +2,10 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional
 from enum import Enum
-from domain.models.dict.lexicons import LOW_INVESTMENT_TOKENS
 import re
+
+from domain.models.dict.lexicons import LOW_INVESTMENT_TOKENS
+
 
 class ContentType(Enum):
     TEXT = "text"
@@ -11,6 +13,7 @@ class ContentType(Enum):
     VOICE = "voice_message"
     STICKER = "sticker"
     DOCUMENT = "document"
+
 
 @dataclass(frozen=True)
 class MessageId:
@@ -24,12 +27,24 @@ class Message:
     telegram_msg_id: int
     sender_id: str
     sender_name: str
-    reply_to_msg_id: int
+    reply_to_msg_id: Optional[int]
     timestamp: datetime
     text: str
     content_type: ContentType = ContentType.TEXT
     reply_to_id: Optional[MessageId] = None
     is_forwarded: bool = False
+    chat_id: int = 0
+    raw_text: str = ""
+    normalized_text: str = ""
+    language: str = "unknown"
+
+    def __post_init__(self):
+        if not self.raw_text and self.text:
+            self.raw_text = self.text
+        if not self.normalized_text and self.text:
+            self.normalized_text = self.text
+        if not self.text and self.raw_text:
+            self.text = self.raw_text
 
     @property
     def is_natural_text(self) -> bool:
@@ -38,23 +53,28 @@ class Message:
 
     @property
     def word_count(self) -> int:
-        if not self.text:
+        target = self.normalized_text or self.text
+        if not target:
             return 0
-        return len(re.findall(r"\b\w+\b", self.text))
-    
-    @property
-    def char_count(self):
-        return len(self.text)
+        return len(re.findall(r"[\w]+", target))
 
     @property
-    def is_question(self):
-        return "?" in self.text
+    def char_count(self) -> int:
+        target = self.normalized_text or self.text
+        return len(target)
 
     @property
-    def exclamation_count(self):
-        return self.text.count("!")
+    def is_question(self) -> bool:
+        target = self.text or self.raw_text
+        return "?" in target or "؟" in target
+
+    @property
+    def exclamation_count(self) -> int:
+        target = self.text or self.raw_text
+        return target.count("!") + target.count("！")
 
     @property
     def is_cold_closure(self) -> bool:
-        clean = re.sub(r"[^\w\s]", "", self.text.strip().lower())
+        target = self.normalized_text or self.text
+        clean = re.sub(r"[^\w\s]", "", target.strip().lower())
         return clean in LOW_INVESTMENT_TOKENS
