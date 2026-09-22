@@ -107,9 +107,10 @@ conversation is shared.
 **Classified** — a model's reading of each message, under
 `/api/assessments`: emotional valence and the positive-to-negative ratio, bids
 for connection and whether the reply engaged with them, friction by kind,
-repair attempts, sarcasm, and open questions. A pass costs about a fifth of a
-second per message, so it is paged and resumable, and every figure is reported
-against how much of the chat it covers.
+repair attempts, sarcasm, and open questions. This runs a model over every
+message on CPU and is expensive — time a small page before starting a long run
+— so it is paged and resumable, and every figure is reported against how much
+of the chat it covers.
 
 These are observations about a transcript, not measurements of a relationship.
 [docs/analytics.md](docs/analytics.md) sets out what each figure means, what it
@@ -131,7 +132,7 @@ Every setting is an environment variable prefixed `TELEGNIZE_`:
 | `TELEGNIZE_TURN_WINDOW_SECONDS` | `21600` | Gap still counted as answering a turn |
 | `TELEGNIZE_SESSION_GAP_SECONDS` | `21600` | Silence that starts a new session |
 | `TELEGNIZE_UPTAKE_WINDOW_SECONDS` | `3600` | How long a question stays live |
-| `TELEGNIZE_ASSESSMENT_PAGE_SIZE` | `200` | Messages assessed per call |
+| `TELEGNIZE_ASSESSMENT_PAGE_SIZE` | `25` | Messages assessed per call |
 | `TELEGNIZE_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated browser origins — the default is where `frontend/` dev-serves |
 | `TELEGNIZE_PRELOAD_DECISION_ENGINE` | `0` | `1` loads model weights at startup |
 

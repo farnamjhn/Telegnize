@@ -157,15 +157,39 @@ so they stay meaningful in a group chat where a two-way ratio would not.
 `POST /api/assessments/{chat_id}` runs a question set over a page of messages;
 `GET /api/assessments/{chat_id}` returns the aggregate.
 
-A question set costs roughly a fifth of a second per message, so a few thousand
-messages is minutes of inference. The pass is therefore **paged and resumable**:
-each POST works through `limit` messages from `offset`, skips anything already
-answered, and returns `next_offset` and `is_complete`. Answers are cached, so
-re-running a range costs nothing.
+### Cost — measure before you commit to a run
+
+Assessment runs a model over every message, on CPU, and it is expensive. How
+expensive is not something this page can tell you:
+
+- Non-Latin text routes to a larger multilingual checkpoint than English does.
+- Sustained inference throttles a laptop, so the tenth minute is slower than
+  the first.
+
+Local measurements of the six-question set spread from under a second to
+roughly ten seconds per message **on the same machine**. At the top of that
+range, three thousand messages is most of a working day with the CPU pinned.
+
+So time one small page on the hardware you intend to use, then decide:
 
 ```bash
-curl -X POST "localhost:8000/api/assessments/1?offset=0&limit=200"
+time curl -X POST "localhost:8000/api/assessments/1?offset=0&limit=5"
 ```
+
+The first call also pays a one-off checkpoint load of about a minute. Set
+`TELEGNIZE_PRELOAD_DECISION_ENGINE=1` to take that at startup instead.
+
+The pass is **paged and resumable**: each POST works through `limit` messages
+from `offset`, skips anything already answered, and returns `next_offset` and
+`is_complete`. Answers are cached, so re-running a range costs nothing.
+
+```bash
+curl -X POST "localhost:8000/api/assessments/1?offset=0&limit=25"
+```
+
+**There is no requirement to assess a whole chat**, and usually no reason to. A
+few hundred messages is enough to read a rate off, and `coverage_percent` keeps
+the partial result honest.
 
 | Field | Meaning |
 | --- | --- |
