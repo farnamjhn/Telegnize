@@ -26,3 +26,6 @@ temp_test_db/
 # Chat exports — never commit a real conversation
 example.json
 *.export.json
+
+# Claude Code local settings
+.claude/settings.local.json
