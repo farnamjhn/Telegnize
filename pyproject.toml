@@ -1,7 +1,17 @@
 [project]
 name = "telegnize"
 version = "0.1.0"
-description = "Add your description here"
+description = "Telegram chat export analyzer"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "fastapi>=0.141.1",
+    "hazm>=0.12.1",
+    "httpx>=0.28.1",
+    "ijson>=3.5.1",
+    "laya>=0.3.5",
+    "nltk>=3.10.3",
+    "pydantic>=2.13.4",
+    "python-multipart>=0.0.32",
+    "uvicorn>=0.53.0",
+]
