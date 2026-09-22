@@ -79,7 +79,24 @@ depends on the engine is also covered against `tests/fakes.FakeDecisionEngine`.
    question needs at least two `criteria`; a `score` question needs at least
    two `levels`; a `noul` needs neither. These are validated on construction —
    a malformed question used to crash inside the model.
-2. Cover it in `tests/test_decision_service.py` against the fake engine.
+2. To have it run over a whole chat, add it to `ASSESSMENT_QUESTIONS` and
+   aggregate it in `AssessmentService._participant`. Remember that each
+   question adds inference time to every message in every pass.
+3. Cover it in `tests/test_decision_service.py` or `tests/test_assessment.py`
+   against `FakeDecisionEngine`, which can be given forced answers. Never add a
+   test that loads real weights outside `tests/test_laya_engine.py`.
+
+### Writing about a classified metric
+Metrics the model produces carry more interpretive weight than counted ones,
+and several borrow vocabulary from clinical research. Two rules:
+
+- **Name what was actually measured.** "Messages the classifier read as
+  negative", not "negative messages".
+- **Do not import a threshold with the vocabulary.** Borrowing Gottman's
+  positive-to-negative ratio does not license quoting his 5:1 figure as a
+  target: that number came from coded observation of couples in a lab against
+  measured outcomes, and nothing here reproduces that. Say so wherever the
+  metric is documented.
 
 Callers can also override the question set per request by posting
 `{"questions": {...}}`, which `questions_from_payload` turns into typed
