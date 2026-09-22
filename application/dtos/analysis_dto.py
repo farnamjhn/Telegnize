@@ -15,6 +15,14 @@ from domain.models.analysis import (
 _FROM_DOMAIN = ConfigDict(from_attributes=True)
 
 
+class LatencyPointDTO(BaseModel):
+    model_config = _FROM_DOMAIN
+
+    period: str
+    median_seconds: float
+    reply_count: int
+
+
 class ResponsivenessDTO(BaseModel):
     model_config = _FROM_DOMAIN
 
@@ -25,6 +33,8 @@ class ResponsivenessDTO(BaseModel):
     question_count: int = 0
     questions_answered_count: int = 0
     questions_answered_percent: float | None = None
+    latency_trend: list[LatencyPointDTO] = []
+    latency_drift_percent: float | None = None
 
 
 class EngagementDTO(BaseModel):
@@ -35,6 +45,7 @@ class EngagementDTO(BaseModel):
     closed_count: int = 0
     turn_count: int = 0
     avg_messages_per_turn: float = 0.0
+    avg_words_per_turn: float = 0.0
     double_text_percent: float = 0.0
     cold_closure_count: int = 0
     cold_closure_percent: float = 0.0
@@ -52,11 +63,15 @@ class ExpressionDTO(BaseModel):
     gratitude_count: int = 0
     self_reference_count: int = 0
     collective_reference_count: int = 0
+    absolutist_count: int = 0
+    elongation_count: int = 0
     exclamations_per_1k_words: float = 0.0
-    emoji_per_1k_words: float = 0.0
     affection_per_1k_words: float = 0.0
     apology_per_1k_words: float = 0.0
     gratitude_per_1k_words: float = 0.0
+    elongation_per_1k_words: float = 0.0
+    emoji_per_100_words: float = 0.0
+    absolutism_percent: float = 0.0
     collective_focus_percent: float | None = None
 
 
@@ -134,3 +149,51 @@ class DecisionDTO(BaseModel):
     @classmethod
     def from_domain(cls, decision: Decision) -> "DecisionDTO":
         return cls.model_validate(decision)
+
+
+class ParticipantAssessmentDTO(BaseModel):
+    model_config = _FROM_DOMAIN
+
+    sender_id: str
+    sender_name: str
+    assessed_message_count: int = 0
+    positive_count: int = 0
+    neutral_count: int = 0
+    negative_count: int = 0
+    positivity_ratio: float | None = None
+    bid_count: int = 0
+    bids_met_count: int = 0
+    bids_met_percent: float | None = None
+    criticism_count: int = 0
+    defensiveness_count: int = 0
+    contempt_count: int = 0
+    friction_percent: float = 0.0
+    repair_count: int = 0
+    repair_percent: float = 0.0
+    avg_sarcasm_score: float | None = None
+    statement_count: int = 0
+    closed_question_count: int = 0
+    open_question_count: int = 0
+    curiosity_per_1k_words: float = 0.0
+
+
+class RelationalAssessmentDTO(BaseModel):
+    model_config = _FROM_DOMAIN
+
+    chat_id: int
+    chat_name: str
+    total_messages: int = 0
+    assessed_messages: int = 0
+    coverage_percent: float = 0.0
+    participants: list[ParticipantAssessmentDTO] = []
+
+
+class AssessmentProgressDTO(BaseModel):
+    model_config = _FROM_DOMAIN
+
+    chat_id: int
+    assessed_now: int
+    skipped_already_done: int
+    next_offset: int
+    is_complete: bool
+    coverage_percent: float

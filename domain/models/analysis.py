@@ -7,6 +7,15 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class LatencyPoint:
+    """One participant's usual reply time during one calendar period."""
+
+    period: str
+    median_seconds: float
+    reply_count: int
+
+
+@dataclass(frozen=True)
 class Responsiveness:
     """How readily one participant answers the other.
 
@@ -28,6 +37,12 @@ class Responsiveness:
     #: at 100%.
     questions_answered_count: int = 0
     questions_answered_percent: float | None = None
+    #: Median reply time period by period, oldest first. A conversation that is
+    #: cooling shows up here before it shows up in any single number.
+    latency_trend: list[LatencyPoint] = field(default_factory=list)
+    #: How much the usual reply time changed from the first half of the trend
+    #: to the second, as a percentage. Positive means slowing down.
+    latency_drift_percent: float | None = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +56,7 @@ class Engagement:
     #: Uninterrupted runs of their own messages.
     turn_count: int = 0
     avg_messages_per_turn: float = 0.0
+    avg_words_per_turn: float = 0.0
     #: Share of their messages that continued their own turn rather than
     #: answering — writing again before the other person has said anything.
     double_text_percent: float = 0.0
@@ -67,12 +83,19 @@ class Expression:
     gratitude_count: int = 0
     self_reference_count: int = 0
     collective_reference_count: int = 0
+    absolutist_count: int = 0
+    elongation_count: int = 0
 
     exclamations_per_1k_words: float = 0.0
-    emoji_per_1k_words: float = 0.0
     affection_per_1k_words: float = 0.0
     apology_per_1k_words: float = 0.0
     gratitude_per_1k_words: float = 0.0
+    elongation_per_1k_words: float = 0.0
+    #: Emoji are frequent enough to read better per hundred words; the rarer
+    #: markers above would round to nothing at that scale.
+    emoji_per_100_words: float = 0.0
+    #: Absolutist words as a percentage of everything this participant wrote.
+    absolutism_percent: float = 0.0
     #: Share of first-person reference that is "we" rather than "I". A pair who
     #: talk about themselves as a unit sit high; this says nothing on its own
     #: about whether that is a good thing.
@@ -151,6 +174,83 @@ class ChatAnalytics:
     avg_response_time_seconds: float | None = None
     rhythm: ConversationRhythm = field(default_factory=ConversationRhythm)
     balance: Balance = field(default_factory=Balance)
+
+
+@dataclass(frozen=True)
+class ParticipantAssessment:
+    """What the decision engine saw in one participant's messages.
+
+    Every figure here is a classifier's reading of text, aggregated. Several
+    name constructs from Gottman's observational research on couples; that
+    research coded video of people in a room, and a model reading chat messages
+    is a long way from it. Treat these as what the classifier saw.
+    """
+
+    sender_id: str
+    sender_name: str
+    assessed_message_count: int = 0
+
+    # Valence, and the positive-to-negative ratio Gottman's work is known for.
+    positive_count: int = 0
+    neutral_count: int = 0
+    negative_count: int = 0
+    #: Positive messages per negative one. None when nothing read as negative,
+    #: which is a better answer than an infinite ratio.
+    positivity_ratio: float | None = None
+
+    # Bids for connection, and whether they were met.
+    bid_count: int = 0
+    bids_met_count: int = 0
+    #: Share of this person's bids that the reply engaged with. In a two-person
+    #: chat this describes how the *other* participant responded to them.
+    bids_met_percent: float | None = None
+
+    # Friction, in the four-horsemen vocabulary.
+    criticism_count: int = 0
+    defensiveness_count: int = 0
+    contempt_count: int = 0
+    friction_percent: float = 0.0
+
+    repair_count: int = 0
+    repair_percent: float = 0.0
+
+    #: Mean of a 0-3 scale, where 0 is straightforward and 3 is heavily barbed.
+    avg_sarcasm_score: float | None = None
+
+    statement_count: int = 0
+    closed_question_count: int = 0
+    open_question_count: int = 0
+    #: Open questions and self-disclosures per thousand words written.
+    curiosity_per_1k_words: float = 0.0
+
+
+@dataclass(frozen=True)
+class RelationalAssessment:
+    """The decision engine's reading of a chat, so far.
+
+    Assessment runs a question set over messages one page at a time, so a
+    result usually covers part of a chat. ``coverage_percent`` says how much,
+    and every figure should be read against it.
+    """
+
+    chat_id: int
+    chat_name: str
+    total_messages: int = 0
+    assessed_messages: int = 0
+    coverage_percent: float = 0.0
+    participants: list[ParticipantAssessment] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class AssessmentProgress:
+    """The outcome of one assessment pass."""
+
+    chat_id: int
+    assessed_now: int
+    skipped_already_done: int
+    next_offset: int
+    is_complete: bool
+    coverage_percent: float
 
 
 class DecisionTarget(StrEnum):

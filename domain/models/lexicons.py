@@ -84,6 +84,27 @@ SELF_REFERENCE_TOKENS: frozenset[str] = frozenset(
     }
 )
 
+#: Absolutist words: the vocabulary of no exceptions and no middle ground.
+#:
+#: The English list is the absolutist dictionary from Al-Mosaiwi & Johnstone's
+#: work on absolutist thinking, kept whole rather than trimmed so the rate
+#: stays comparable to published figures. It includes common words like "all"
+#: and "must" by design; read the rate, and only against another participant in
+#: the same conversation.
+ABSOLUTIST_TOKENS: frozenset[str] = frozenset(
+    {
+        # English
+        "absolutely", "all", "always", "complete", "completely", "constant",
+        "constantly", "definitely", "entire", "entirely", "ever", "every",
+        "everyone", "everything", "full", "must", "never", "nothing",
+        "totally", "whole",
+        # Persian
+        "همیشه", "هیچوقت", "هیچ‌وقت", "هرگز", "اصلا", "اصلاً", "قطعا", "قطعاً",
+        "کاملا", "کاملاً", "مطلقا", "مطلقاً", "تماما", "تماماً", "همه",
+        "هیچی", "هیچ", "حتما", "حتماً", "باید", "دائما", "همیشگی",
+    }
+)
+
 #: First-person plural reference: the participants spoken of as a unit.
 COLLECTIVE_REFERENCE_TOKENS: frozenset[str] = frozenset(
     {

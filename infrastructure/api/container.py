@@ -13,6 +13,7 @@ from application.ports.decision_engine import IDecisionEngine
 from application.ports.export_reader import IExportReader
 from application.ports.text_normalizer import ITextNormalizer
 from application.services.analytics_service import AnalyticsService
+from application.services.assessment_service import AssessmentService
 from application.services.chat_service import ChatService
 from application.services.decision_service import DecisionService
 from application.services.ingestion_service import IngestionService
@@ -97,6 +98,16 @@ class Container:
     @cached_property
     def analytics_service(self) -> AnalyticsService:
         return AnalyticsService(self.chat_repository, self.message_repository)
+
+    @cached_property
+    def assessment_service(self) -> AssessmentService:
+        return AssessmentService(
+            chat_repo=self.chat_repository,
+            message_repo=self.message_repository,
+            decision_repo=self.decision_repository,
+            engine=self.decision_engine,
+            page_size=self.settings.assessment_page_size,
+        )
 
     @cached_property
     def decision_service(self) -> DecisionService:

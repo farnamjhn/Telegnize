@@ -14,7 +14,8 @@ _COLUMNS = (
     "text_content, normalized_text, language, content_type, reply_to_msg_id, "
     "is_forwarded, word_count, char_count, is_question, is_cold_closure, "
     "exclamation_count, emoji_count, affection_count, apology_count, "
-    "gratitude_count, self_reference_count, collective_reference_count"
+    "gratitude_count, self_reference_count, collective_reference_count, "
+    "absolutist_count, elongation_count"
 )
 _PLACEHOLDERS = ", ".join(f":{name.strip()}" for name in _COLUMNS.split(","))
 _UPDATES = ", ".join(
@@ -71,6 +72,49 @@ _LATENCIES = """
       AND latency <= CASE WHEN answers_reply THEN :reply_window ELSE :turn_window END;
 """
 
+# Response latencies tagged with the calendar period they fall in, so a
+# participant's usual reply time can be tracked as it moves. Same latency rule
+# as _LATENCIES; the period format is supplied by the caller because a chat
+# spanning years wants months where one spanning weeks wants weeks.
+_LATENCY_PERIODS = """
+    WITH ordered AS (
+        SELECT
+            id,
+            sender_id,
+            timestamp,
+            reply_to_msg_id,
+            LAG(sender_id) OVER turn AS prev_sender_id,
+            LAG(timestamp) OVER turn AS prev_timestamp
+        FROM messages
+        WHERE chat_id = :chat_id
+        WINDOW turn AS (ORDER BY timestamp, id)
+    ),
+    timed AS (
+        SELECT
+            o.sender_id AS sender_id,
+            strftime(:period_format, o.timestamp) AS period,
+            parent.sender_id IS NOT NULL AS answers_reply,
+            CASE
+                WHEN parent.sender_id IS NOT NULL AND parent.sender_id <> o.sender_id
+                    THEN (julianday(o.timestamp) - julianday(parent.timestamp)) * 86400.0
+                WHEN parent.sender_id IS NULL
+                     AND o.prev_sender_id IS NOT NULL
+                     AND o.prev_sender_id <> o.sender_id
+                    THEN (julianday(o.timestamp) - julianday(o.prev_timestamp)) * 86400.0
+            END AS latency
+        FROM ordered o
+        LEFT JOIN messages parent
+            ON parent.chat_id = :chat_id
+           AND parent.telegram_msg_id = o.reply_to_msg_id
+    )
+    SELECT sender_id, period, latency
+    FROM timed
+    WHERE latency IS NOT NULL
+      AND latency >= 0
+      AND latency <= CASE WHEN answers_reply THEN :reply_window ELSE :turn_window END
+    ORDER BY period;
+"""
+
 # Consecutive messages from one sender form a "burst": one uninterrupted turn.
 # Several of the queries below are about turns rather than messages, so they all
 # build on this fragment, which numbers every message's burst in one pass.
@@ -81,6 +125,7 @@ _BURSTS_CTE = """
             sender_id,
             timestamp,
             is_question,
+            word_count,
             LAG(sender_id) OVER turn AS prev_sender_id
         FROM messages
         WHERE chat_id = :chat_id
@@ -106,7 +151,8 @@ _TURN_TAKING = f"""
         sender_id,
         COUNT(*)                 AS message_count,
         COUNT(DISTINCT burst_no) AS burst_count,
-        SUM(CASE WHEN prev_sender_id = sender_id THEN 1 ELSE 0 END) AS continuations
+        SUM(CASE WHEN prev_sender_id = sender_id THEN 1 ELSE 0 END) AS continuations,
+        SUM(word_count)          AS word_count
     FROM bursts
     GROUP BY sender_id;
 """
@@ -300,6 +346,8 @@ class SQLiteMessageRepository(IMessageRepository):
             "gratitude_count": markers.gratitude,
             "self_reference_count": markers.self_reference,
             "collective_reference_count": markers.collective_reference,
+            "absolutist_count": markers.absolutist,
+            "elongation_count": markers.elongation,
         }
 
     # --- writes -----------------------------------------------------------
@@ -405,6 +453,8 @@ class SQLiteMessageRepository(IMessageRepository):
                     SUM(gratitude_count)            AS gratitude_count,
                     SUM(self_reference_count)       AS self_reference_count,
                     SUM(collective_reference_count) AS collective_reference_count,
+                    SUM(absolutist_count)           AS absolutist_count,
+                    SUM(elongation_count)           AS elongation_count,
                     SUM(content_type = 'voice_message')                AS voice_count,
                     SUM(content_type NOT IN ('text', 'voice_message')) AS media_count
                 FROM messages
@@ -448,6 +498,32 @@ class SQLiteMessageRepository(IMessageRepository):
                 (chat_id,),
             ).fetchall()
         return {row["language"]: row["total"] for row in rows}
+
+    def get_response_latency_periods(
+        self, chat_id: int, period_format: str
+    ) -> dict[str, dict[str, list[float]]]:
+        """Response latencies per sender, bucketed by calendar period.
+
+        ``period_format`` is a SQLite strftime pattern, so the caller decides
+        whether a bucket is a week or a month.
+        """
+        periods: dict[str, dict[str, list[float]]] = {}
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                _LATENCY_PERIODS,
+                {
+                    "chat_id": chat_id,
+                    "period_format": period_format,
+                    "reply_window": self._reply_window,
+                    "turn_window": self._turn_window,
+                },
+            )
+            for row in rows:
+                by_period = periods.setdefault(row["sender_id"], {})
+                by_period.setdefault(row["period"], []).append(
+                    round(float(row["latency"]), _LATENCY_PRECISION)
+                )
+        return periods
 
     def get_turn_taking(self, chat_id: int) -> dict[str, dict[str, int]]:
         with self._db.connect() as conn:

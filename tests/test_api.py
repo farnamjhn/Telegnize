@@ -3,9 +3,13 @@ import unittest
 
 from fastapi.testclient import TestClient
 
+from application.services.assessment_service import AssessmentService
 from application.services.decision_service import DecisionService
 from infrastructure.api.app import create_app
-from infrastructure.api.dependencies import get_decision_service
+from infrastructure.api.dependencies import (
+    get_assessment_service,
+    get_decision_service,
+)
 from tests.conftest import memory_container
 from tests.fakes import FakeDecisionEngine
 
@@ -49,6 +53,14 @@ class APITestCase(unittest.TestCase):
             message_repo=self.container.message_repository,
             decision_repo=self.container.decision_repository,
             engine=self.engine,
+        )
+        self.app.dependency_overrides[get_assessment_service] = (
+            lambda: AssessmentService(
+                chat_repo=self.container.chat_repository,
+                message_repo=self.container.message_repository,
+                decision_repo=self.container.decision_repository,
+                engine=self.engine,
+            )
         )
         self.client = TestClient(self.app)
 
@@ -247,6 +259,48 @@ class TestDecisionEndpoints(APITestCase):
         response = self.client.post(f"/api/decisions/messages/{self.given_message()}")
         self.assertEqual(response.status_code, 503)
         self.assertNotIn("checkpoint unavailable", response.text)
+
+
+class TestAssessmentEndpoints(APITestCase):
+    def given_chat(self) -> int:
+        return self.client.post(
+            "/api/chats/upload",
+            files={"file": ("export.json", PERSIAN_EXPORT, "application/json")},
+        ).json()["chat"]["id"]
+
+    def test_assess_then_read_the_aggregate(self):
+        chat_id = self.given_chat()
+
+        progress = self.client.post(f"/api/assessments/{chat_id}")
+        self.assertEqual(progress.status_code, 200)
+        body = progress.json()
+        self.assertEqual(body["assessed_now"], 2)
+        self.assertTrue(body["is_complete"])
+        self.assertEqual(body["coverage_percent"], 100.0)
+
+        assessment = self.client.get(f"/api/assessments/{chat_id}").json()
+        self.assertEqual(assessment["coverage_percent"], 100.0)
+        self.assertEqual(len(assessment["participants"]), 2)
+        for field in ("positivity_ratio", "friction_percent", "avg_sarcasm_score"):
+            self.assertIn(field, assessment["participants"][0])
+
+    def test_paging_is_driven_by_the_returned_offset(self):
+        chat_id = self.given_chat()
+        first = self.client.post(
+            f"/api/assessments/{chat_id}", params={"limit": 1}
+        ).json()
+        self.assertEqual(first["assessed_now"], 1)
+        self.assertFalse(first["is_complete"])
+
+        second = self.client.post(
+            f"/api/assessments/{chat_id}",
+            params={"limit": 1, "offset": first["next_offset"]},
+        ).json()
+        self.assertTrue(second["is_complete"])
+
+    def test_an_unknown_chat_is_a_404(self):
+        self.assertEqual(self.client.post("/api/assessments/9999").status_code, 404)
+        self.assertEqual(self.client.get("/api/assessments/9999").status_code, 404)
 
 
 if __name__ == "__main__":
