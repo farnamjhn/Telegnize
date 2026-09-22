@@ -1,8 +1,15 @@
 # What Telegnize measures
 
-`GET /api/analytics/{chat_id}` returns four groups of figures: volume, and
-then per participant **responsiveness**, **engagement**, and **expression**,
-plus chat-level **rhythm** and **balance**.
+Telegnize reports two kinds of figure, and they are not equally trustworthy.
+
+**Counted** figures come from arithmetic over timestamps and words. They are
+exact: if it says someone replied in a median of 15 seconds, they did.
+`GET /api/analytics/{chat_id}` returns these.
+
+**Classified** figures come from a model reading each message. They are a
+reading, and a reading can be wrong about any individual message.
+`GET /api/assessments/{chat_id}` returns these, and every one of them should be
+read against its `coverage_percent`.
 
 ## Read this first
 
@@ -51,6 +58,21 @@ came directly before.
 | `reply_count` | Replies the median is computed from |
 | `question_count` | Questions this person asked |
 | `questions_answered_percent` | Share the other party took up **while still live** |
+| `latency_trend` | Median reply time period by period, oldest first |
+| `latency_drift_percent` | Change from the first half of that series to the second |
+
+### Latency drift
+
+A single median hides when it changed. `latency_trend` gives one point per week
+— per month for a chat spanning more than half a year — each with the
+`reply_count` behind it, so a median resting on three replies is visible as
+such.
+
+`latency_drift_percent` is positive when someone is answering more slowly than
+they were. Expect very large values when a conversation simply stops: a final
+period where replies come hours apart instead of seconds will read in the
+thousands of percent. The series is the thing to look at; the single number
+only tells you which direction to look in.
 
 Uptake uses a one-hour window by default, not the 24-hour reply window.
 Measured over a day, any active conversation answers everything eventually and
@@ -64,7 +86,7 @@ Who carries the conversation.
 | --- | --- |
 | `opened_count`, `opened_percent` | Conversations started after a silence |
 | `closed_count` | Conversations where they had the last word |
-| `turn_count`, `avg_messages_per_turn` | Uninterrupted runs of their own messages |
+| `turn_count`, `avg_messages_per_turn`, `avg_words_per_turn` | Uninterrupted runs of their own messages |
 | `double_text_percent` | Share of their messages that continued their own turn |
 | `cold_closure_count`, `cold_closure_percent` | Whole messages that are a bare "ok" / "باشه" |
 | `voice_message_count`, `media_count` | Non-text messages |
@@ -84,9 +106,20 @@ everything.
 | `affection_per_1k_words` | Endearments, "miss", "love", `عزیزم`, `قربونت` |
 | `gratitude_per_1k_words` | "thanks", `مرسی`, `ممنون` |
 | `apology_per_1k_words` | "sorry", `ببخشید`, `شرمنده` |
-| `emoji_per_1k_words` | Emoji characters |
+| `emoji_per_100_words` | Emoji characters. Per *hundred* words — they are frequent enough that per-thousand reads badly |
 | `exclamations_per_1k_words` | `!` and `！` |
+| `elongation_per_1k_words` | Stretched words: "soooo", `سلاممم` |
+| `absolutism_percent` | Absolutist words as a share of everything they wrote |
 | `collective_focus_percent` | Share of first-person words that are "we" not "I" |
+
+`elongation` is counted on the text as sent, before normalization — normalizing
+collapses runs of three characters, which is the whole point of normalizing and
+would erase exactly what this measures.
+
+`absolutism_percent` uses Al-Mosaiwi & Johnstone's absolutist dictionary,
+unabridged, so it includes ordinary words like "all" and "must". That keeps the
+rate comparable to published figures but means the absolute number is only
+meaningful next to another participant in the same conversation.
 
 Exclamation marks are a weak affect signal outside English-language chat — in
 many conversations emoji carry all of it, and the exclamation rate sits at
@@ -119,6 +152,51 @@ session gap — roughly, one sitting.
 Balance figures are a normalised Shannon entropy over the participants' shares,
 so they stay meaningful in a group chat where a two-way ratio would not.
 
+## Classified figures: the assessment
+
+`POST /api/assessments/{chat_id}` runs a question set over a page of messages;
+`GET /api/assessments/{chat_id}` returns the aggregate.
+
+A question set costs roughly a fifth of a second per message, so a few thousand
+messages is minutes of inference. The pass is therefore **paged and resumable**:
+each POST works through `limit` messages from `offset`, skips anything already
+answered, and returns `next_offset` and `is_complete`. Answers are cached, so
+re-running a range costs nothing.
+
+```bash
+curl -X POST "localhost:8000/api/assessments/1?offset=0&limit=200"
+```
+
+| Field | Meaning |
+| --- | --- |
+| `positive_count`, `neutral_count`, `negative_count` | How each message read |
+| `positivity_ratio` | Positive messages per negative one. `null` when nothing read negative |
+| `bid_count`, `bids_met_count`, `bids_met_percent` | Reaching out, and whether the reply engaged |
+| `criticism_count`, `defensiveness_count`, `contempt_count`, `friction_percent` | Friction, by kind |
+| `repair_count`, `repair_percent` | Apologising, making peace, defusing |
+| `avg_sarcasm_score` | 0 (straightforward) to 3 (heavily barbed) |
+| `statement_count`, `closed_question_count`, `open_question_count` | What each message was doing |
+| `curiosity_per_1k_words` | Open questions and self-disclosures per thousand words |
+
+### What these borrow, and what they do not inherit
+
+`positivity_ratio`, bids, the friction categories and repair attempts all name
+constructs from **Gottman's** observational research on couples. That research
+coded trained observers watching video of people in a room, over years, against
+outcomes. A classifier reading chat text shares the vocabulary and none of the
+validation.
+
+So: the well-known 5:1 ratio is **not** a threshold to hold this number against.
+A chat is a slice of a relationship that also happens in person, on calls, and
+in silence; text strips tone; and the classifier is wrong about individual
+messages. Use these to find stretches of conversation worth reading yourself,
+not to conclude anything.
+
+`bids_met_percent` is computed over bids that got a reply inside the page at
+all, and in a two-person chat it describes how the *other* participant
+responded. In a group chat the attribution is looser, because the reply may
+come from anyone.
+
 ## Tuning the windows
 
 What counts as answering, as one sitting, or as a question still being live
@@ -130,11 +208,16 @@ depends on the conversation. All four thresholds are settings:
 | `TELEGNIZE_TURN_WINDOW_SECONDS` | 21600 | Gap still counted as answering the previous turn |
 | `TELEGNIZE_SESSION_GAP_SECONDS` | 21600 | Silence that starts a new session |
 | `TELEGNIZE_UPTAKE_WINDOW_SECONDS` | 3600 | How long a question stays live |
+| `TELEGNIZE_ASSESSMENT_PAGE_SIZE` | 200 | Messages assessed per call |
 
 ## How it is computed
 
-Every figure comes from an aggregate query. Marker counts are derived on the
+Counted figures come from aggregate queries. Marker counts are derived on the
 `Message` entity and written to columns as messages are stored, and turn
 boundaries and sessions are window functions over the message table, so a chat
-of any size is analysed in constant memory. See
-[architecture.md](architecture.md).
+of any size is analysed in constant memory.
+
+Classified figures are cached in the `decisions` table keyed by message and
+question, and aggregated with a group-by joining back to the sender — so
+reading an assessment costs one set of queries no matter how much has been
+assessed. See [architecture.md](architecture.md).
