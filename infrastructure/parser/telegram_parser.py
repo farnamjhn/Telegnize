@@ -1,15 +1,22 @@
+import io
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, BinaryIO, Dict, Generator, List, Optional, Union
+
+import ijson
 
 from domain.models.message import ContentType, Message, MessageId
+from infrastructure.nlp.normalizer import TextNormalizer, get_normalizer
 
 
 class TelegramJsonParser:
-    """Parses Telegram exported JSONs into Message entity."""
+    """Parses Telegram exported JSONs into Message entity with streaming support and NLP normalization."""
 
-    def parse_message_dict(self, msg_dict: Dict[str, Any]) -> Optional[Message]:
+    def __init__(self, normalizer: Optional[TextNormalizer] = None):
+        self.normalizer = normalizer or get_normalizer()
+
+    def parse_message_dict(self, msg_dict: Dict[str, Any], chat_id: int = 1) -> Optional[Message]:
         """Parses a single Telegram message dictionary into a domain Message entity."""
         if not isinstance(msg_dict, dict):
             return None
@@ -51,8 +58,11 @@ class TelegramJsonParser:
         # Timestamp parsing
         timestamp = self._parse_timestamp(msg_dict)
 
-        # Text extraction
-        text = self._extract_text(msg_dict.get("text", ""))
+        # Raw text extraction
+        raw_text = self._extract_text(msg_dict.get("text", ""))
+
+        # Multilingual NLP normalization (Hazm for Persian, NLTK/Regex for English)
+        normalized_text, language = self.normalizer.normalize(raw_text)
 
         # Content type determination
         content_type = self._determine_content_type(msg_dict)
@@ -71,15 +81,20 @@ class TelegramJsonParser:
             sender_name=sender_name,
             reply_to_msg_id=reply_to_msg_id,
             timestamp=timestamp,
-            text=text,
+            text=raw_text,
             content_type=content_type,
             reply_to_id=reply_to_id,
             is_forwarded=is_forwarded,
+            chat_id=chat_id,
+            raw_text=raw_text,
+            normalized_text=normalized_text,
+            language=language,
         )
 
     def parse_data(
         self,
         data: Union[Dict[str, Any], List[Dict[str, Any]]],
+        chat_id: int = 1,
     ) -> List[Message]:
         """Parses a dictionary or list containing Telegram exported JSON data."""
         if isinstance(data, dict):
@@ -91,26 +106,90 @@ class TelegramJsonParser:
 
         parsed_messages: List[Message] = []
         for msg_dict in messages_raw:
-            msg = self.parse_message_dict(msg_dict)
+            msg = self.parse_message_dict(msg_dict, chat_id=chat_id)
             if msg is not None:
                 parsed_messages.append(msg)
 
         return parsed_messages
 
-    def parse_json(self, json_str: str) -> List[Message]:
+    def parse_json(self, json_str: str, chat_id: int = 1) -> List[Message]:
         """Parses a JSON string into Message entities."""
         data = json.loads(json_str)
-        return self.parse_data(data)
+        return self.parse_data(data, chat_id=chat_id)
 
-    def parse_file(self, file_path: Union[str, Path]) -> List[Message]:
+    def parse_file(self, file_path: Union[str, Path], chat_id: int = 1) -> List[Message]:
         """Parses a Telegram export JSON file into Message entities."""
         path = Path(file_path)
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return self.parse_data(data)
+        return self.parse_data(data, chat_id=chat_id)
+
+    def extract_chat_metadata(
+        self, file_input: Union[str, Path, BinaryIO]
+    ) -> Dict[str, Any]:
+        """Extracts top-level chat metadata without parsing the entire file."""
+        if isinstance(file_input, (str, Path)):
+            with open(file_input, "rb") as f:
+                return self._extract_meta_from_stream(f)
+        else:
+            return self._extract_meta_from_stream(file_input)
+
+    def _extract_meta_from_stream(self, stream: BinaryIO) -> Dict[str, Any]:
+        meta: Dict[str, Any] = {
+            "name": "Exported Chat",
+            "type": "personal_chat",
+            "id": 0,
+        }
+        try:
+            parser = ijson.parse(stream)
+            for prefix, event, value in parser:
+                if prefix == "name" and event == "string":
+                    meta["name"] = value
+                elif prefix == "type" and event == "string":
+                    meta["type"] = value
+                elif prefix == "id" and event == "number":
+                    meta["id"] = int(value)
+                elif prefix == "messages.item":
+                    break
+        except Exception:
+            pass
+        return meta
+
+    def stream_messages(
+        self,
+        file_input: Union[str, Path, BinaryIO],
+        chat_id: int = 1,
+        batch_size: int = 500,
+    ) -> Generator[List[Message], None, None]:
+        """Streams messages in batches using ijson to conserve memory."""
+        if isinstance(file_input, (str, Path)):
+            with open(file_input, "rb") as f:
+                yield from self._stream_from_file_object(f, chat_id=chat_id, batch_size=batch_size)
+        else:
+            yield from self._stream_from_file_object(file_input, chat_id=chat_id, batch_size=batch_size)
+
+    def _stream_from_file_object(
+        self,
+        stream: BinaryIO,
+        chat_id: int = 1,
+        batch_size: int = 500,
+    ) -> Generator[List[Message], None, None]:
+        items = ijson.items(stream, "messages.item")
+        batch: List[Message] = []
+
+        for item in items:
+            msg = self.parse_message_dict(item, chat_id=chat_id)
+            if msg is not None:
+                batch.append(msg)
+                if len(batch) >= batch_size:
+                    yield batch
+                    batch = []
+
+        if batch:
+            yield batch
 
     def _extract_text(self, text_val: Any) -> str:
-        """Extracts plain text from Telegram text field (which can be str, list of entity dicts, or None)."""
+        """Extracts plain text from Telegram text field (str, list of entity dicts, or None)."""
         if isinstance(text_val, str):
             return text_val
         elif isinstance(text_val, list):
