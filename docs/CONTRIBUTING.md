@@ -122,7 +122,59 @@ container. `IngestionService` does not change.
 
 ---
 
-## 4. Conventions
+## 4. The frontend
+
+`frontend/` is a React + TypeScript app (Vite). It is an API client and
+nothing more — no analysis happens there. If the UI needs a number, add it to
+the analytics aggregate and serve it; do not compute it over a page of
+messages in the browser.
+
+```
+src/lib/        api client, DTO mirrors, formatting, hooks
+src/components/ primitives, the app shell, the chart layer
+src/views/      one file per section
+src/styles/     tokens.css (the theme) + base.css (everything else)
+```
+
+- **Types mirror the DTOs.** `src/lib/types.ts` is the wire shape of
+  `application/dtos/`. Change a DTO, change that file — `npm --prefix frontend
+  run typecheck` then names every view that has drifted.
+- **The participant tables follow the DTO groups.** Volume, responsiveness,
+  engagement and expression are one table each behind a toggle, mirroring
+  `ParticipantStatsDTO`'s nesting and the sections of
+  [analytics.md](analytics.md). A new metric goes in the group it belongs to,
+  and that document's caveat goes into the table's subtitle — these figures are
+  easy to over-read, and the UI must not help.
+- **A metric with no data says so.** Marker columns are written at ingest, so a
+  chat imported before a metric existed reads as all-zero. The Expression table
+  detects that and explains it rather than showing a wall of zeros.
+- **Plain CSS, one dark theme.** Every colour, radius and duration is a custom
+  property in `tokens.css`; components reference roles, never raw hex. There is
+  no CSS framework and no component library — a new widget is a class in
+  `base.css`.
+- **Charts follow the house rules.** A single-series chart is one colour with
+  no legend (the card title names it). Categorical charts use the three fixed
+  series slots in order — white, orange, grey — and fold the tail into
+  "+N more"; never add a fourth. The slots separate by lightness rather than
+  hue, which survives colour blindness but makes the swatch weak identity, so a
+  legend and a table view are mandatory. Bars cap at 24px with a rounded
+  data-end and gridlines are solid hairlines.
+- **Orange is reserved.** It is the alarm end of a scale — errors, destructive
+  actions, low confidence — and the only chromatic colour in the system. Using
+  it decoratively costs it its meaning.
+- **Persian is first-class here too.** Message text gets its direction from
+  `directionOf`, which reads the language tag and falls back to the script.
+- **Filters live in one row above what they scope**, never inside a card, and a
+  refetch holds the previous render at reduced opacity rather than flashing a
+  skeleton.
+
+```bash
+npm --prefix frontend run typecheck
+```
+
+---
+
+## 5. Conventions
 
 - **Branches**: `feat/…`, `fix/…`, `perf/…`, `docs/…`.
 - **Commits**: Conventional Commits, e.g. `feat(decisions): add escalation
@@ -136,7 +188,7 @@ container. `IngestionService` does not change.
 
 ---
 
-## 5. Troubleshooting
+## 6. Troubleshooting
 
 **Slow or rate-limited Laya downloads.** Set `HF_TOKEN`; weights cache in
 `~/.cache/huggingface/hub/` after the first run. Set
