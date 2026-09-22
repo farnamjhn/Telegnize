@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS messages (
     gratitude_count            INTEGER NOT NULL DEFAULT 0,
     self_reference_count       INTEGER NOT NULL DEFAULT 0,
     collective_reference_count INTEGER NOT NULL DEFAULT 0,
+    absolutist_count           INTEGER NOT NULL DEFAULT 0,
+    elongation_count           INTEGER NOT NULL DEFAULT 0,
     UNIQUE(chat_id, telegram_msg_id)
 );
 

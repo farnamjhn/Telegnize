@@ -77,8 +77,14 @@ class IMessageRepository(ABC):
         """Per-sender response latencies in seconds, for turns they answered."""
 
     @abstractmethod
+    def get_response_latency_periods(
+        self, chat_id: int, period_format: str
+    ) -> dict[str, dict[str, list[float]]]:
+        """Response latencies per sender, bucketed by calendar period."""
+
+    @abstractmethod
     def get_turn_taking(self, chat_id: int) -> dict[str, dict[str, int]]:
-        """Per-sender message, turn, and same-sender continuation counts."""
+        """Per-sender message, turn, continuation, and word counts."""
 
     @abstractmethod
     def get_question_uptake(self, chat_id: int) -> dict[str, dict[str, int]]:

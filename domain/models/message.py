@@ -7,6 +7,7 @@ from enum import StrEnum
 
 from domain.models.language import Language
 from domain.models.lexicons import (
+    ABSOLUTIST_TOKENS,
     AFFECTION_TOKENS,
     APOLOGY_TOKENS,
     COLLECTIVE_REFERENCE_TOKENS,
@@ -16,6 +17,9 @@ from domain.models.lexicons import (
 )
 
 _WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
+# Three or more of the same letter in a row: "soooo", "سلاممم". Letters only,
+# so a row of dots or exclamation marks is not mistaken for elongation.
+_ELONGATION_PATTERN = re.compile(r"(\w)\1{2,}", re.UNICODE)
 _PUNCTUATION_PATTERN = re.compile(r"[^\w\s]", re.UNICODE)
 
 #: Question marks recognised across the languages Telegnize supports.
@@ -54,6 +58,9 @@ class MessageMarkers:
     gratitude: int = 0
     self_reference: int = 0
     collective_reference: int = 0
+    absolutist: int = 0
+    #: Stretched-out words, counted on the text as sent.
+    elongation: int = 0
 
 
 class ContentType(StrEnum):
@@ -155,6 +162,10 @@ class Message:
             gratitude=occurrences(GRATITUDE_TOKENS),
             self_reference=occurrences(SELF_REFERENCE_TOKENS),
             collective_reference=occurrences(COLLECTIVE_REFERENCE_TOKENS),
+            absolutist=occurrences(ABSOLUTIST_TOKENS),
+            # Counted on the raw text: normalization collapses "سلاممم" to
+            # "سلامم", which is the point of normalizing and would erase this.
+            elongation=len(_ELONGATION_PATTERN.findall(self.text)),
         )
 
     @property

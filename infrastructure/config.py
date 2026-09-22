@@ -77,6 +77,11 @@ class Settings:
         default_factory=lambda: _env_int("UPTAKE_WINDOW_SECONDS", 60 * 60)
     )
 
+    #: Messages assessed per call to the assessment endpoint. Each one costs a
+    #: run of the question set, so this trades response time for progress.
+    assessment_page_size: int = field(
+        default_factory=lambda: _env_int("ASSESSMENT_PAGE_SIZE", 200)
+    )
     #: Load the decision-engine checkpoints at startup instead of on first use.
     preload_decision_engine: bool = field(
         default_factory=lambda: _env("PRELOAD_DECISION_ENGINE", "0") == "1"

@@ -261,6 +261,115 @@ class TestExpression(AnalyticsTestCase):
         self.assertEqual(self.participant("u3").expression.affection_count, 2)
 
 
+class TestAbsolutismAndElongation(AnalyticsTestCase):
+    def test_absolutist_words_are_counted_as_a_share_of_writing(self):
+        self.messages.save_batch(
+            [
+                self.message(1, "u1", 0, "you always do this and never listen"),
+                self.message(2, "u2", 60, "i think it went fine yesterday"),
+            ]
+        )
+        alice = self.participant("u1").expression
+        self.assertEqual(alice.absolutist_count, 2)
+        # Two absolutist words out of seven.
+        self.assertAlmostEqual(alice.absolutism_percent, 28.57, places=2)
+        self.assertEqual(self.participant("u2").expression.absolutist_count, 0)
+
+    def test_persian_absolutist_words_are_counted(self):
+        self.messages.save(self.message(1, "u1", 0, "همیشه همینطوره اصلا گوش نمیدی"))
+        self.assertEqual(self.participant("u1").expression.absolutist_count, 2)
+
+    def test_elongation_survives_normalization(self):
+        # The normalizer collapses "سلاممم" to "سلامم", so elongation has to be
+        # read off the text as sent or it disappears before it is counted.
+        self.messages.save_batch(
+            [
+                self.message(1, "u1", 0, "soooo good, thanksss"),
+                self.message(2, "u2", 60, "سلاممم چطوریییی"),
+                self.message(3, "u1", 120, "normal text...."),
+            ]
+        )
+        self.assertEqual(self.participant("u1").expression.elongation_count, 2)
+        self.assertEqual(self.participant("u2").expression.elongation_count, 2)
+
+    def test_repeated_punctuation_is_not_elongation(self):
+        self.messages.save(self.message(1, "u1", 0, "what!!!! really????"))
+        self.assertEqual(self.participant("u1").expression.elongation_count, 0)
+
+    def test_emoji_density_is_reported_per_hundred_words(self):
+        self.messages.save(self.message(1, "u1", 0, "one two three four 😊😊"))
+        # Two emoji over four words.
+        self.assertEqual(self.participant("u1").expression.emoji_per_100_words, 50.0)
+
+
+class TestVerbosity(AnalyticsTestCase):
+    def test_words_per_turn_differs_from_words_per_message(self):
+        self.messages.save_batch(
+            [
+                self.message(1, "u1", 0, "one two"),
+                self.message(2, "u1", 10, "three four"),
+                self.message(3, "u2", 60, "one two three four"),
+            ]
+        )
+        alice = self.participant("u1")
+        bob = self.participant("u2")
+        # Alice split four words across two messages in one turn; Bob sent the
+        # same four words as a single message. Per message they differ, per
+        # turn they are equal.
+        self.assertEqual(alice.avg_words_per_message, 2.0)
+        self.assertEqual(bob.avg_words_per_message, 4.0)
+        self.assertEqual(alice.engagement.avg_words_per_turn, 4.0)
+        self.assertEqual(bob.engagement.avg_words_per_turn, 4.0)
+
+
+class TestLatencyDrift(AnalyticsTestCase):
+    def conversation(self, delays_by_week):
+        messages = []
+        msg_id = 1
+        for week, delay in enumerate(delays_by_week):
+            for exchange in range(3):
+                base = week * 7 * DAY + exchange * 3600
+                messages.append(self.message(msg_id, "u1", base, "ping"))
+                messages.append(self.message(msg_id + 1, "u2", base + delay, "pong"))
+                msg_id += 2
+        self.messages.save_batch(messages)
+
+    def test_the_trend_reports_a_median_per_period(self):
+        self.conversation([10, 20, 30, 40])
+        trend = self.participant("u2").responsiveness.latency_trend
+        self.assertEqual(len(trend), 4)
+        self.assertEqual([point.median_seconds for point in trend], [10, 20, 30, 40])
+        self.assertEqual([point.reply_count for point in trend], [3, 3, 3, 3])
+
+    def test_a_cooling_conversation_shows_positive_drift(self):
+        self.conversation([10, 10, 40, 40])
+        drift = self.participant("u2").responsiveness.latency_drift_percent
+        self.assertEqual(drift, 300.0)
+
+    def test_a_warming_conversation_shows_negative_drift(self):
+        self.conversation([40, 40, 10, 10])
+        self.assertEqual(
+            self.participant("u2").responsiveness.latency_drift_percent, -75.0
+        )
+
+    def test_a_steady_conversation_shows_no_drift(self):
+        self.conversation([20, 20, 20, 20])
+        self.assertEqual(
+            self.participant("u2").responsiveness.latency_drift_percent, 0.0
+        )
+
+    def test_a_single_period_has_no_drift_to_report(self):
+        self.messages.save_batch(
+            [
+                self.message(1, "u1", 0, "hi"),
+                self.message(2, "u2", 30, "hey"),
+            ]
+        )
+        responsiveness = self.participant("u2").responsiveness
+        self.assertEqual(len(responsiveness.latency_trend), 1)
+        self.assertIsNone(responsiveness.latency_drift_percent)
+
+
 class TestRhythm(AnalyticsTestCase):
     def test_late_night_share(self):
         offset = int((datetime(2026, 5, 27, 1, 0, 0) - BASE_TIME).total_seconds())

@@ -18,6 +18,7 @@ from application.dtos.analysis_dto import (
     ConversationRhythmDTO,
     EngagementDTO,
     ExpressionDTO,
+    LatencyPointDTO,
     ParticipantStatsDTO,
     ResponsivenessDTO,
 )
@@ -30,6 +31,12 @@ _WORDS_PER_RATE_UNIT = 1000
 
 #: Hours counted as late night, when people tend to write more freely.
 LATE_NIGHT_HOURS = range(0, 5)
+
+#: Above this span, the latency trend is bucketed by month instead of week, so
+#: a chat running for years does not return hundreds of points.
+_MONTHLY_TREND_ABOVE_DAYS = 180
+_WEEKLY_PERIOD_FORMAT = "%Y-W%W"
+_MONTHLY_PERIOD_FORMAT = "%Y-%m"
 
 
 class AnalyticsService:
@@ -58,6 +65,9 @@ class AnalyticsService:
 
         total_words = sum(int(row["word_count"] or 0) for row in totals)
         latencies = self._messages.get_response_latencies(chat_id)
+        trends = self._messages.get_response_latency_periods(
+            chat_id, self._period_format(chat_id)
+        )
         turn_taking = self._messages.get_turn_taking(chat_id)
         uptake = self._messages.get_question_uptake(chat_id)
         boundaries = self._messages.get_session_boundaries(chat_id)
@@ -75,6 +85,7 @@ class AnalyticsService:
                 total_words=total_words,
                 total_openings=total_openings,
                 latencies=latencies.get(row["sender_id"], []),
+                trend=trends.get(row["sender_id"], {}),
                 turns=turn_taking.get(row["sender_id"], {}),
                 uptake=uptake.get(row["sender_id"], {}),
                 boundaries=boundaries.get(row["sender_id"], {}),
@@ -109,6 +120,7 @@ class AnalyticsService:
         total_words: int,
         total_openings: int,
         latencies: Sequence[float],
+        trend: Mapping[str, Sequence[float]],
         turns: Mapping[str, int],
         uptake: Mapping[str, int],
         boundaries: Mapping[str, int],
@@ -125,7 +137,7 @@ class AnalyticsService:
             avg_words_per_message=round(word_count / message_count, _ROUNDING),
             message_share_percent=_percent(message_count, total_messages),
             word_share_percent=_percent(word_count, total_words),
-            responsiveness=self._responsiveness(latencies, uptake),
+            responsiveness=self._responsiveness(latencies, trend, uptake),
             engagement=self._engagement(
                 row, message_count, total_openings, turns, boundaries
             ),
@@ -134,10 +146,20 @@ class AnalyticsService:
 
     @staticmethod
     def _responsiveness(
-        latencies: Sequence[float], uptake: Mapping[str, int]
+        latencies: Sequence[float],
+        trend: Mapping[str, Sequence[float]],
+        uptake: Mapping[str, int],
     ) -> ResponsivenessDTO:
         asked = int(uptake.get("question_count") or 0)
         answered = int(uptake.get("answered_count") or 0)
+        points = [
+            LatencyPointDTO(
+                period=period,
+                median_seconds=round(median(values), _ROUNDING),
+                reply_count=len(values),
+            )
+            for period, values in sorted(trend.items())
+        ]
         return ResponsivenessDTO(
             avg_seconds=_rounded_mean(latencies),
             median_seconds=round(median(latencies), _ROUNDING) if latencies else None,
@@ -146,6 +168,10 @@ class AnalyticsService:
             question_count=asked,
             questions_answered_count=answered,
             questions_answered_percent=_percent(answered, asked) if asked else None,
+            latency_trend=points,
+            latency_drift_percent=_drift(
+                [point.median_seconds for point in points]
+            ),
         )
 
     @staticmethod
@@ -157,6 +183,7 @@ class AnalyticsService:
         boundaries: Mapping[str, int],
     ) -> EngagementDTO:
         turn_count = int(turns.get("burst_count") or 0)
+        turn_words = int(turns.get("word_count") or 0)
         opened = int(boundaries.get("opened_count") or 0)
         cold_closures = int(row["cold_closure_count"] or 0)
         return EngagementDTO(
@@ -166,6 +193,9 @@ class AnalyticsService:
             turn_count=turn_count,
             avg_messages_per_turn=(
                 round(message_count / turn_count, _ROUNDING) if turn_count else 0.0
+            ),
+            avg_words_per_turn=(
+                round(turn_words / turn_count, _ROUNDING) if turn_count else 0.0
             ),
             double_text_percent=_percent(
                 int(turns.get("continuations") or 0), message_count
@@ -200,14 +230,32 @@ class AnalyticsService:
             gratitude_count=count("gratitude_count"),
             self_reference_count=self_reference,
             collective_reference_count=collective,
+            absolutist_count=count("absolutist_count"),
+            elongation_count=count("elongation_count"),
             exclamations_per_1k_words=rate("exclamation_count"),
-            emoji_per_1k_words=rate("emoji_count"),
             affection_per_1k_words=rate("affection_count"),
             apology_per_1k_words=rate("apology_count"),
             gratitude_per_1k_words=rate("gratitude_count"),
+            elongation_per_1k_words=rate("elongation_count"),
+            emoji_per_100_words=(
+                round(count("emoji_count") / word_count * 100, _ROUNDING)
+                if word_count
+                else 0.0
+            ),
+            absolutism_percent=_percent(count("absolutist_count"), word_count),
             collective_focus_percent=(
                 _percent(collective, first_person) if first_person else None
             ),
+        )
+
+    def _period_format(self, chat_id: int) -> str:
+        """Picks week or month buckets to suit how long the chat runs."""
+        shape = self._messages.get_session_shape(chat_id)
+        span = float(shape.get("span_days") or 0.0)
+        return (
+            _MONTHLY_PERIOD_FORMAT
+            if span > _MONTHLY_TREND_ABOVE_DAYS
+            else _WEEKLY_PERIOD_FORMAT
         )
 
     # --- chat-level -------------------------------------------------------
@@ -277,6 +325,24 @@ def _percentile(values: Sequence[float], fraction: float) -> float | None:
     ordered = sorted(values)
     rank = max(0, math.ceil(fraction * len(ordered)) - 1)
     return round(ordered[rank], _ROUNDING)
+
+
+def _drift(series: Sequence[float]) -> float | None:
+    """Percentage change from the first half of a series to the second.
+
+    Positive means the usual reply time grew — the participant is answering
+    more slowly than they were. Needs at least two periods to say anything.
+    """
+    if len(series) < 2:
+        return None
+    midpoint = len(series) // 2
+    earlier, later = series[:midpoint], series[midpoint:]
+    if not earlier or not later:
+        return None
+    baseline = median(earlier)
+    if baseline <= 0:
+        return None
+    return round((median(later) - baseline) / baseline * 100, _ROUNDING)
 
 
 def _evenness(shares: Sequence[int]) -> float:
