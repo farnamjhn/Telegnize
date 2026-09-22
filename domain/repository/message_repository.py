@@ -75,3 +75,19 @@ class IMessageRepository(ABC):
     @abstractmethod
     def get_response_latencies(self, chat_id: int) -> dict[str, list[float]]:
         """Per-sender response latencies in seconds, for turns they answered."""
+
+    @abstractmethod
+    def get_turn_taking(self, chat_id: int) -> dict[str, dict[str, int]]:
+        """Per-sender message, turn, and same-sender continuation counts."""
+
+    @abstractmethod
+    def get_question_uptake(self, chat_id: int) -> dict[str, dict[str, int]]:
+        """Per-sender questions asked, and how many the other party picked up."""
+
+    @abstractmethod
+    def get_session_boundaries(self, chat_id: int) -> dict[str, dict[str, int]]:
+        """Per-sender counts of conversations opened and closed."""
+
+    @abstractmethod
+    def get_session_shape(self, chat_id: int) -> dict[str, float | None]:
+        """Chat-level session count, sizes, silence, and active-day span."""

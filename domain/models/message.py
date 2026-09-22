@@ -6,7 +6,14 @@ from datetime import datetime
 from enum import StrEnum
 
 from domain.models.language import Language
-from domain.models.lexicons import LOW_INVESTMENT_TOKENS
+from domain.models.lexicons import (
+    AFFECTION_TOKENS,
+    APOLOGY_TOKENS,
+    COLLECTIVE_REFERENCE_TOKENS,
+    GRATITUDE_TOKENS,
+    LOW_INVESTMENT_TOKENS,
+    SELF_REFERENCE_TOKENS,
+)
 
 _WORD_PATTERN = re.compile(r"\w+", re.UNICODE)
 _PUNCTUATION_PATTERN = re.compile(r"[^\w\s]", re.UNICODE)
@@ -15,6 +22,38 @@ _PUNCTUATION_PATTERN = re.compile(r"[^\w\s]", re.UNICODE)
 QUESTION_MARKS = ("?", "؟")
 #: Exclamation marks recognised across the languages Telegnize supports.
 EXCLAMATION_MARKS = ("!", "！")
+
+# Emoji are counted per character, so a joined sequence such as a family emoji
+# counts once per person in it. Variation selectors and skin-tone modifiers are
+# deliberately outside these ranges: they dress an emoji rather than being one,
+# and counting them made "❤️" score twice.
+_EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F300-\U0001F3FA"  # pictographs (up to, not including, skin tones)
+    "\U0001F400-\U0001FAFF"  # emoticons, transport, supplemental, extended
+    "\U0001F000-\U0001F0FF"  # mahjong, dominoes, playing cards
+    "\U0001F1E6-\U0001F1FF"  # regional indicators (flags)
+    "\U00002600-\U000027BF"  # miscellaneous symbols and dingbats
+    "\U00002B00-\U00002BFF"  # arrows, stars, geometric shapes
+    "]"
+)
+
+
+@dataclass(frozen=True)
+class MessageMarkers:
+    """Counts of the expressive markers one message carries.
+
+    Each count is an observation about wording, not a measurement of feeling —
+    see :mod:`domain.models.lexicons` for what the lists do and do not claim.
+    """
+
+    exclamations: int = 0
+    emoji: int = 0
+    affection: int = 0
+    apology: int = 0
+    gratitude: int = 0
+    self_reference: int = 0
+    collective_reference: int = 0
 
 
 class ContentType(StrEnum):
@@ -93,8 +132,30 @@ class Message:
         return any(mark in self.text for mark in QUESTION_MARKS)
 
     @property
-    def exclamation_count(self) -> int:
-        return sum(self.text.count(mark) for mark in EXCLAMATION_MARKS)
+    def markers(self) -> MessageMarkers:
+        """Counts the expressive markers in this message.
+
+        Computed on each access rather than cached, because the bulk path
+        (persisting a batch) reads it exactly once per message.
+        """
+        text = self.analysis_text
+        if not text:
+            return MessageMarkers()
+
+        tokens = [token.lower() for token in _WORD_PATTERN.findall(text)]
+
+        def occurrences(vocabulary: frozenset[str]) -> int:
+            return sum(1 for token in tokens if token in vocabulary)
+
+        return MessageMarkers(
+            exclamations=sum(text.count(mark) for mark in EXCLAMATION_MARKS),
+            emoji=len(_EMOJI_PATTERN.findall(text)),
+            affection=occurrences(AFFECTION_TOKENS),
+            apology=occurrences(APOLOGY_TOKENS),
+            gratitude=occurrences(GRATITUDE_TOKENS),
+            self_reference=occurrences(SELF_REFERENCE_TOKENS),
+            collective_reference=occurrences(COLLECTIVE_REFERENCE_TOKENS),
+        )
 
     @property
     def is_cold_closure(self) -> bool:
