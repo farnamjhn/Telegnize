@@ -18,7 +18,18 @@ uv run telegnize
 The API then serves on `http://127.0.0.1:8000`, with interactive documentation
 at `/docs`.
 
-Import an export and look at it:
+To bring up the web interface as well, in a second shell:
+
+```bash
+npm --prefix frontend install
+npm --prefix frontend run dev
+```
+
+The UI serves on `http://localhost:3000` and proxies `/api` to the API on port
+8000, so no CORS configuration is needed. Point it somewhere else with
+`TELEGNIZE_API=http://host:port npm --prefix frontend run dev`.
+
+Or drive it from the command line. Import an export and look at it:
 
 ```bash
 curl -X POST localhost:8000/api/chats/import-local \
@@ -44,6 +55,25 @@ curl localhost:8000/api/analytics/1
 | `POST` | `/api/decisions/custom` | Ask arbitrary typed questions |
 | `GET` | `/api/health` | Service and dependency status |
 
+## Interface
+
+`frontend/` is a React + TypeScript app built with Vite, and the only consumer
+of the API that ships in this repository. It covers the same ground the
+endpoints do: importing exports, the behavioural profile of a chat, a message
+browser that lays Persian out right-to-left, and typed decisions with the
+probability the engine assigned to every alternative. The participant tables
+follow the four groups of [docs/analytics.md](docs/analytics.md), each carrying
+that document's caveat about what the figures do and do not support.
+
+```bash
+npm --prefix frontend run dev        # http://localhost:3000
+npm --prefix frontend run build      # static bundle in frontend/dist
+npm --prefix frontend run typecheck
+```
+
+A production build reads `VITE_API_BASE` for the API origin; leaving it unset
+makes the bundle call `/api` on whatever host serves it.
+
 ## Architecture
 
 Three layers, with dependencies pointing inward:
@@ -52,6 +82,7 @@ Three layers, with dependencies pointing inward:
 domain/          entities, lexicons, repository interfaces   — no frameworks
 application/     services, DTOs, outbound ports              — no adapters
 infrastructure/  FastAPI, SQLite, ijson, hazm, Laya          — the outside world
+frontend/        React + Vite UI                             — an API client
 ```
 
 `application/ports/` holds the interfaces the services depend on — an export
@@ -90,7 +121,7 @@ Every setting is an environment variable prefixed `TELEGNIZE_`:
 | `TELEGNIZE_TURN_WINDOW_SECONDS` | `21600` | Gap still counted as answering a turn |
 | `TELEGNIZE_SESSION_GAP_SECONDS` | `21600` | Silence that starts a new session |
 | `TELEGNIZE_UPTAKE_WINDOW_SECONDS` | `3600` | How long a question stays live |
-| `TELEGNIZE_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated browser origins |
+| `TELEGNIZE_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated browser origins — the default is where `frontend/` dev-serves |
 | `TELEGNIZE_PRELOAD_DECISION_ENGINE` | `0` | `1` loads model weights at startup |
 
 ## Tests
