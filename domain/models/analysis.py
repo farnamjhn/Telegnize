@@ -22,7 +22,10 @@ class Responsiveness:
     p90_seconds: float | None = None
     reply_count: int = 0
     question_count: int = 0
-    #: Questions this person asked that the other party took up in time.
+    #: Questions this person asked that the other party took up while the
+    #: question was still live — an hour by default, not a whole day, because
+    #: over a day a busy conversation answers everything and the figure pins
+    #: at 100%.
     questions_answered_count: int = 0
     questions_answered_percent: float | None = None
 

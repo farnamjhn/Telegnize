@@ -118,15 +118,29 @@ class TestUnansweredQuestions(AnalyticsTestCase):
         self.assertEqual(alice.questions_answered_count, 1)
         self.assertEqual(alice.questions_answered_percent, 50.0)
 
-    def test_an_answer_that_arrives_days_later_does_not_count(self):
+    def test_an_answer_that_arrives_hours_later_does_not_count(self):
+        # A reply this late is still a reply, but the question was no longer
+        # live, which is what uptake is about.
         self.messages.save_batch(
             [
                 self.message(1, "u1", 0, "are you coming?"),
-                self.message(2, "u2", 3 * DAY, "sorry, missed this"),
+                self.message(2, "u2", 5 * 3600, "sorry, missed this"),
+            ]
+        )
+        responsiveness = self.participant("u1").responsiveness
+        self.assertEqual(responsiveness.question_count, 1)
+        self.assertEqual(responsiveness.questions_answered_count, 0)
+        self.assertEqual(responsiveness.questions_answered_percent, 0.0)
+
+    def test_an_answer_inside_the_window_counts(self):
+        self.messages.save_batch(
+            [
+                self.message(1, "u1", 0, "are you coming?"),
+                self.message(2, "u2", 30 * 60, "yes, on my way"),
             ]
         )
         self.assertEqual(
-            self.participant("u1").responsiveness.questions_answered_count, 0
+            self.participant("u1").responsiveness.questions_answered_percent, 100.0
         )
 
 
@@ -315,6 +329,38 @@ class TestBalance(AnalyticsTestCase):
             ]
         )
         self.assertEqual(self.analytics().balance.response_time_ratio, 10.0)
+
+
+class TestConfigurableWindows(unittest.TestCase):
+    def test_a_shorter_session_gap_splits_the_chat_into_more_sittings(self):
+        from domain.models.chat import Chat as _Chat
+
+        for gap_seconds, expected_sessions in ((6 * 3600, 1), (600, 2)):
+            with self.subTest(gap_seconds=gap_seconds):
+                container = memory_container(session_gap_seconds=gap_seconds)
+                try:
+                    chat = container.chat_repository.save(
+                        _Chat(id=0, telegram_chat_id=1, name="Windows")
+                    )
+                    container.message_repository.save_batch(
+                        [
+                            Message(
+                                id=0, chat_id=chat.id, telegram_msg_id=i,
+                                sender_id="u1", sender_name="Alice",
+                                timestamp=BASE_TIME + timedelta(seconds=offset),
+                                text="hi",
+                            )
+                            for i, offset in enumerate((0, 3600), start=1)
+                        ]
+                    )
+                    analytics = container.analytics_service.compute_chat_analytics(
+                        chat.id
+                    )
+                    self.assertEqual(
+                        analytics.rhythm.session_count, expected_sessions
+                    )
+                finally:
+                    container.close()
 
 
 class TestMediaAndEdgeCases(AnalyticsTestCase):

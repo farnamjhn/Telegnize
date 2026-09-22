@@ -86,11 +86,28 @@ Callers can also override the question set per request by posting
 questions.
 
 ### Adding an analytics metric
-1. Add the field to `ChatAnalytics` and `ChatAnalyticsDTO`.
+1. Add the field to the matching read model in `domain/models/analysis.py`
+   (`Responsiveness`, `Engagement`, `Expression`, `ConversationRhythm`,
+   `Balance`) and to its DTO.
 2. Add an aggregate method to `IMessageRepository` and implement it as a query
    in `SQLiteMessageRepository`. Do not add a Python loop over a whole chat.
 3. Assert on it in `tests/test_analytics.py`, and on the query itself in
    `tests/test_sqlite_repositories.py`.
+4. Document it in `docs/analytics.md`, including what it cannot tell you.
+
+Two rules specific to this area:
+
+- **Normalise for verbosity.** A raw count of anything mostly measures who
+  writes more. Report a rate per thousand words, or a share, alongside it.
+- **Check the metric does not saturate.** A threshold generous enough that
+  every participant scores 100% carries no information. Try it against a real
+  export before settling on the window.
+
+### Adding a word marker
+Add the token to the right set in `domain/models/lexicons.py`, add a counter to
+`MessageMarkers` and a column if it is a new category, and add the migration
+entry. Keep the module docstring's honesty note intact: these lists describe
+wording, and the documentation must not let them read as a score of anyone.
 
 ### Changing the database schema
 1. Edit `infrastructure/persistence/schema.sql`. Every statement must be

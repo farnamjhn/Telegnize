@@ -56,6 +56,27 @@ class Settings:
             "CORS_ORIGINS", ["http://localhost:3000", "http://127.0.0.1:3000"]
         )
     )
+    # --- analysis windows -------------------------------------------------
+    # What counts as answering, as one sitting, or as a question still being
+    # live depends on the conversation: colleagues and a couple keep very
+    # different rhythms, so these are settings rather than constants.
+    #: Longest gap still counted as answering an explicit reply, in seconds.
+    reply_window_seconds: int = field(
+        default_factory=lambda: _env_int("REPLY_WINDOW_SECONDS", 24 * 60 * 60)
+    )
+    #: Longest gap still counted as answering the previous turn, in seconds.
+    turn_window_seconds: int = field(
+        default_factory=lambda: _env_int("TURN_WINDOW_SECONDS", 6 * 60 * 60)
+    )
+    #: Silence long enough to treat what follows as a new conversation.
+    session_gap_seconds: int = field(
+        default_factory=lambda: _env_int("SESSION_GAP_SECONDS", 6 * 60 * 60)
+    )
+    #: How long a question stays live for the purpose of counting it answered.
+    uptake_window_seconds: int = field(
+        default_factory=lambda: _env_int("UPTAKE_WINDOW_SECONDS", 60 * 60)
+    )
+
     #: Load the decision-engine checkpoints at startup instead of on first use.
     preload_decision_engine: bool = field(
         default_factory=lambda: _env("PRELOAD_DECISION_ENGINE", "0") == "1"

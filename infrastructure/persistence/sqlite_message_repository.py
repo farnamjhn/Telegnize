@@ -113,7 +113,12 @@ _TURN_TAKING = f"""
 
 # Per sender: how many of their questions the other party picked up. A question
 # counts as taken up when the next turn — which by definition belongs to someone
-# else — starts inside the reply window.
+# else — starts inside the uptake window.
+#
+# That window is deliberately much tighter than the reply window. Measured over
+# a day, a conversation of any density answers every question eventually and the
+# figure pins at 100%, which says nothing; the question worth asking is whether
+# someone responded while the question was still live.
 _QUESTION_UPTAKE = f"""
     WITH {_BURSTS_CTE},
     burst_starts AS (
@@ -131,7 +136,7 @@ _QUESTION_UPTAKE = f"""
         SUM(
             CASE WHEN a.replied_at IS NOT NULL
                   AND (julianday(a.replied_at) - julianday(b.timestamp)) * 86400.0
-                      <= :reply_window
+                      <= :uptake_window
                  THEN 1 ELSE 0 END
         ) AS answered_count
     FROM bursts b
@@ -232,6 +237,8 @@ DEFAULT_REPLY_WINDOW_SECONDS = 24 * 60 * 60
 DEFAULT_TURN_WINDOW_SECONDS = 6 * 60 * 60
 #: Silence long enough to treat what follows as a new conversation, in seconds.
 DEFAULT_SESSION_GAP_SECONDS = 6 * 60 * 60
+#: How long a question stays live for the purpose of counting it answered.
+DEFAULT_UPTAKE_WINDOW_SECONDS = 60 * 60
 
 
 class SQLiteMessageRepository(IMessageRepository):
@@ -241,11 +248,13 @@ class SQLiteMessageRepository(IMessageRepository):
         reply_window_seconds: int = DEFAULT_REPLY_WINDOW_SECONDS,
         turn_window_seconds: int = DEFAULT_TURN_WINDOW_SECONDS,
         session_gap_seconds: int = DEFAULT_SESSION_GAP_SECONDS,
+        uptake_window_seconds: int = DEFAULT_UPTAKE_WINDOW_SECONDS,
     ) -> None:
         self._db = database
         self._reply_window = reply_window_seconds
         self._turn_window = turn_window_seconds
         self._session_gap = session_gap_seconds
+        self._uptake_window = uptake_window_seconds
 
     # --- mapping ----------------------------------------------------------
     @staticmethod
@@ -449,7 +458,7 @@ class SQLiteMessageRepository(IMessageRepository):
         with self._db.connect() as conn:
             rows = conn.execute(
                 _QUESTION_UPTAKE,
-                {"chat_id": chat_id, "reply_window": self._reply_window},
+                {"chat_id": chat_id, "uptake_window": self._uptake_window},
             ).fetchall()
         return {row["sender_id"]: dict(row) for row in rows}
 
