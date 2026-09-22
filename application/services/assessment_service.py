@@ -1,10 +1,18 @@
 """Runs the decision engine over a chat's messages and aggregates the answers.
 
-A full pass is slow — a question set takes roughly a fifth of a second per
-message, so a few thousand messages is minutes of inference. So assessment is
-paged and resumable: each call works through one page, skips anything already
-answered, and reports where to pick up. Answers land in the decision cache, and
-the aggregate is computed from whatever is in there.
+A full pass is expensive, and how expensive is not predictable from here: it is
+CPU inference, the multilingual checkpoint that non-Latin text routes to is
+slower than the English one, and a laptop under sustained load throttles. Local
+measurements of the six-question set ranged from under a second to roughly ten
+seconds per message on the same machine. Treat a few thousand messages as hours
+of saturated CPU, and measure a small page on the target hardware before
+starting a long run.
+
+So assessment is paged and resumable: each call works through one page, skips
+anything already answered, and reports where to pick up. Answers land in the
+decision cache, and the aggregate is computed from whatever is in there. There
+is no need to assess a whole chat — a few hundred messages is enough to read a
+rate off, and every aggregate is reported against its coverage.
 """
 
 import logging
@@ -26,8 +34,11 @@ from domain.repository.message_repository import IMessageRepository
 
 logger = logging.getLogger(__name__)
 
-#: Messages assessed per call. About forty seconds of inference.
-DEFAULT_PAGE_SIZE = 200
+#: Messages assessed per call. Deliberately small: a page is a blocking run of
+#: the question set per message, and per-message cost varies by an order of
+#: magnitude across languages and machines. Raise it once you have timed a page
+#: on the hardware it will run on.
+DEFAULT_PAGE_SIZE = 25
 
 #: The question whose presence marks a message as assessed.
 _COVERAGE_KEY = "valence"
