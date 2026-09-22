@@ -178,6 +178,12 @@ class TestAnalyticsEndpoint(APITestCase):
         self.assertIn("fa", body["language_breakdown"])
         self.assertEqual(body["avg_response_time_seconds"], 60.0)
 
+        participant = body["participants"][0]
+        for section in ("responsiveness", "engagement", "expression"):
+            self.assertIn(section, participant)
+        self.assertEqual(body["rhythm"]["session_count"], 1)
+        self.assertIn("message_balance_percent", body["balance"])
+
     def test_analytics_for_an_unknown_chat_is_a_404(self):
         self.assertEqual(self.client.get("/api/analytics/9999").status_code, 404)
 

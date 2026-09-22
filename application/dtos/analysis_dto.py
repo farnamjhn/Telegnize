@@ -12,25 +12,94 @@ from domain.models.analysis import (
     DecisionType,
 )
 
+_FROM_DOMAIN = ConfigDict(from_attributes=True)
+
+
+class ResponsivenessDTO(BaseModel):
+    model_config = _FROM_DOMAIN
+
+    avg_seconds: float | None = None
+    median_seconds: float | None = None
+    p90_seconds: float | None = None
+    reply_count: int = 0
+    question_count: int = 0
+    questions_answered_count: int = 0
+    questions_answered_percent: float | None = None
+
+
+class EngagementDTO(BaseModel):
+    model_config = _FROM_DOMAIN
+
+    opened_count: int = 0
+    opened_percent: float | None = None
+    closed_count: int = 0
+    turn_count: int = 0
+    avg_messages_per_turn: float = 0.0
+    double_text_percent: float = 0.0
+    cold_closure_count: int = 0
+    cold_closure_percent: float = 0.0
+    voice_message_count: int = 0
+    media_count: int = 0
+
+
+class ExpressionDTO(BaseModel):
+    model_config = _FROM_DOMAIN
+
+    exclamation_count: int = 0
+    emoji_count: int = 0
+    affection_count: int = 0
+    apology_count: int = 0
+    gratitude_count: int = 0
+    self_reference_count: int = 0
+    collective_reference_count: int = 0
+    exclamations_per_1k_words: float = 0.0
+    emoji_per_1k_words: float = 0.0
+    affection_per_1k_words: float = 0.0
+    apology_per_1k_words: float = 0.0
+    gratitude_per_1k_words: float = 0.0
+    collective_focus_percent: float | None = None
+
 
 class ParticipantStatsDTO(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = _FROM_DOMAIN
 
     sender_id: str
     sender_name: str
     message_count: int
     word_count: int
     char_count: int
-    question_count: int
-    cold_closure_count: int
     avg_words_per_message: float
     message_share_percent: float
-    avg_response_time_seconds: float | None = None
-    median_response_time_seconds: float | None = None
+    word_share_percent: float
+    responsiveness: ResponsivenessDTO
+    engagement: EngagementDTO
+    expression: ExpressionDTO
+
+
+class ConversationRhythmDTO(BaseModel):
+    model_config = _FROM_DOMAIN
+
+    session_count: int = 0
+    avg_messages_per_session: float = 0.0
+    avg_session_minutes: float = 0.0
+    active_days: int = 0
+    span_days: int = 0
+    active_day_percent: float = 0.0
+    longest_silence_days: float = 0.0
+    late_night_percent: float = 0.0
+
+
+class BalanceDTO(BaseModel):
+    model_config = _FROM_DOMAIN
+
+    message_balance_percent: float = 100.0
+    word_balance_percent: float = 100.0
+    initiation_balance_percent: float = 100.0
+    response_time_ratio: float | None = None
 
 
 class ChatAnalyticsDTO(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = _FROM_DOMAIN
 
     chat_id: int
     chat_name: str
@@ -42,6 +111,8 @@ class ChatAnalyticsDTO(BaseModel):
     daily_distribution: dict[str, int] = {}
     language_breakdown: dict[str, int] = {}
     avg_response_time_seconds: float | None = None
+    rhythm: ConversationRhythmDTO = ConversationRhythmDTO()
+    balance: BalanceDTO = BalanceDTO()
 
     @classmethod
     def from_domain(cls, analytics: ChatAnalytics) -> "ChatAnalyticsDTO":
@@ -49,7 +120,7 @@ class ChatAnalyticsDTO(BaseModel):
 
 
 class DecisionDTO(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = _FROM_DOMAIN
 
     target_type: DecisionTarget
     target_id: int

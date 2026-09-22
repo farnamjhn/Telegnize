@@ -28,6 +28,14 @@ CREATE TABLE IF NOT EXISTS messages (
     char_count       INTEGER NOT NULL DEFAULT 0,
     is_question      INTEGER NOT NULL DEFAULT 0,
     is_cold_closure  INTEGER NOT NULL DEFAULT 0,
+    -- Expressive markers; see domain/models/lexicons.py for what they mean.
+    exclamation_count          INTEGER NOT NULL DEFAULT 0,
+    emoji_count                INTEGER NOT NULL DEFAULT 0,
+    affection_count            INTEGER NOT NULL DEFAULT 0,
+    apology_count              INTEGER NOT NULL DEFAULT 0,
+    gratitude_count            INTEGER NOT NULL DEFAULT 0,
+    self_reference_count       INTEGER NOT NULL DEFAULT 0,
+    collective_reference_count INTEGER NOT NULL DEFAULT 0,
     UNIQUE(chat_id, telegram_msg_id)
 );
 

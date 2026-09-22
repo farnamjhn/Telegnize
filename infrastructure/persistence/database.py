@@ -31,6 +31,13 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("messages", "char_count", "INTEGER NOT NULL DEFAULT 0"),
     ("messages", "is_question", "INTEGER NOT NULL DEFAULT 0"),
     ("messages", "is_cold_closure", "INTEGER NOT NULL DEFAULT 0"),
+    ("messages", "exclamation_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("messages", "emoji_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("messages", "affection_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("messages", "apology_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("messages", "gratitude_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("messages", "self_reference_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("messages", "collective_reference_count", "INTEGER NOT NULL DEFAULT 0"),
     ("decisions", "engine_metadata", "TEXT NOT NULL DEFAULT '{}'"),
 ]
 
