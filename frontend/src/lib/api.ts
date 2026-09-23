@@ -6,12 +6,14 @@
  */
 
 import type {
+  AssessmentProgress,
   Chat,
   ChatAnalytics,
   Decision,
   Health,
   ImportSummary,
   Message,
+  RelationalAssessment,
 } from "./types";
 
 const BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
@@ -89,6 +91,16 @@ export const api = {
     ),
 
   analytics: (chatId: number) => request<ChatAnalytics>(`/analytics/${chatId}`),
+
+  assessment: (chatId: number) => request<RelationalAssessment>(`/assessments/${chatId}`),
+
+  /** Assesses one page. Slow by nature — the caller decides the page size and
+   *  drives the loop, because this runs a model over every message. */
+  assessPage: (chatId: number, offset: number, limit: number) =>
+    request<AssessmentProgress>(
+      `/assessments/${chatId}?offset=${offset}&limit=${limit}`,
+      { method: "POST" },
+    ),
 
   listMessages: (params: {
     chatId?: number;

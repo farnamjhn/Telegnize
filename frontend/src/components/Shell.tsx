@@ -4,11 +4,12 @@ import { api } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { Icon } from "./Primitives";
 
-export type ViewName = "chats" | "analytics" | "messages" | "decisions";
+export type ViewName = "chats" | "analytics" | "assessment" | "messages" | "decisions";
 
-const NAV: { id: ViewName; label: string; icon: "chats" | "analytics" | "messages" | "decisions" }[] = [
+const NAV: { id: ViewName; label: string; icon: "chats" | "analytics" | "assessment" | "messages" | "decisions" }[] = [
   { id: "chats", label: "Chats", icon: "chats" },
   { id: "analytics", label: "Analytics", icon: "analytics" },
+  { id: "assessment", label: "Assessment", icon: "assessment" },
   { id: "messages", label: "Messages", icon: "messages" },
   { id: "decisions", label: "Decisions", icon: "decisions" },
 ];

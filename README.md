@@ -62,9 +62,14 @@ curl localhost:8000/api/analytics/1
 of the API that ships in this repository. It covers the same ground the
 endpoints do: importing exports, the behavioural profile of a chat, a message
 browser that lays Persian out right-to-left, and typed decisions with the
-probability the engine assigned to every alternative. The participant tables
-follow the four groups of [docs/analytics.md](docs/analytics.md), each carrying
-that document's caveat about what the figures do and do not support.
+probability the engine assigned to every alternative.
+
+Counted and classified figures are kept apart the way
+[docs/analytics.md](docs/analytics.md) keeps them apart — **Analytics** for what
+was counted, **Assessment** for what a model read. The participant tables in
+both follow that document's groups, each carrying its caveat, and the
+assessment pass is driven one page at a time from the UI so a run is always a
+deliberate choice rather than something a button starts by accident.
 
 ```bash
 npm --prefix frontend run dev        # http://localhost:3000
@@ -142,9 +147,9 @@ Every setting is an environment variable prefixed `TELEGNIZE_`:
 uv run python -m unittest discover -s tests -t .
 ```
 
-`tests/test_laya_engine.py` downloads and runs real model weights. Skip it when
-working offline:
+`tests/test_laya_engine.py` downloads and runs real model weights, so it is
+skipped by default. Set `TELEGNIZE_SKIP_MODEL_TESTS=0` to run it deliberately:
 
 ```bash
-TELEGNIZE_SKIP_MODEL_TESTS=1 uv run python -m unittest discover -s tests -t .
+TELEGNIZE_SKIP_MODEL_TESTS=0 uv run python -m unittest discover -s tests -t .
 ```
