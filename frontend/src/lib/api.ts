@@ -13,6 +13,7 @@ import type {
   Health,
   ImportSummary,
   Message,
+  RederiveSummary,
   RelationalAssessment,
 } from "./types";
 
@@ -91,6 +92,12 @@ export const api = {
     ),
 
   analytics: (chatId: number) => request<ChatAnalytics>(`/analytics/${chatId}`),
+
+  /** Recomputes the derived columns from text already stored, for a chat
+   *  imported before a metric existed. Rewrites every row, so it is slow on a
+   *  large chat and worth showing a spinner for. */
+  rederive: (chatId: number) =>
+    request<RederiveSummary>(`/chats/${chatId}/rederive`, { method: "POST" }),
 
   assessment: (chatId: number) => request<RelationalAssessment>(`/assessments/${chatId}`),
 

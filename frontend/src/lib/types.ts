@@ -118,6 +118,72 @@ export interface Expression {
   collective_focus_percent: number | null;
 }
 
+/** When someone writes, and how fast they answer while still awake. */
+export interface Circadian {
+  hourly_distribution: Record<string, number>;
+  night_owl_percent: number;
+  peak_hour: number | null;
+  active_median_seconds: number | null;
+  active_p90_seconds: number | null;
+  active_reply_count: number;
+  revived_count: number;
+  revived_percent: number | null;
+}
+
+/** Who sets the pace of a conversation, and who is left holding it. */
+export interface Control {
+  burst_count: number;
+  long_burst_count: number;
+  long_burst_percent: number;
+  longest_burst: number;
+  avg_burst_size: number;
+  last_word_count: number;
+  last_word_percent: number | null;
+  collision_count: number;
+  collision_percent: number;
+}
+
+/** What the messages are made of: vocabulary, media, voice. */
+export interface Composition {
+  unique_word_count: number;
+  type_token_ratio: number | null;
+  /** Moving-average TTR. The comparable one — raw TTR falls as a sample grows. */
+  lexical_diversity: number | null;
+  text_message_count: number;
+  media_message_count: number;
+  media_percent: number;
+  link_count: number;
+  voice_message_count: number;
+  voice_seconds: number;
+  avg_voice_seconds: number | null;
+  /** Voice notes whose length the export carried. Zero means the durations
+   *  were never imported, not that the notes were empty. */
+  timed_voice_count: number;
+}
+
+/** Asking, hedging, and going along with what the other person said. */
+export interface Stance {
+  interrogative_count: number;
+  questions_per_100_messages: number;
+  hedge_count: number;
+  hedge_per_1k_words: number;
+  backchannel_count: number;
+  backchannel_percent: number;
+}
+
+/** Function-word convergence across adjacent turns. Describes a pair, so it
+ *  is chat-level rather than per participant. */
+export interface StyleMatching {
+  lsm_percent: number | null;
+  by_category: Record<string, number>;
+  turn_pairs: number;
+}
+
+export interface RederiveSummary {
+  chat_id: number;
+  messages_rewritten: number;
+}
+
 export interface ParticipantStats {
   sender_id: string;
   sender_name: string;
@@ -130,6 +196,10 @@ export interface ParticipantStats {
   responsiveness: Responsiveness;
   engagement: Engagement;
   expression: Expression;
+  circadian: Circadian;
+  control: Control;
+  composition: Composition;
+  stance: Stance;
 }
 
 /** The shape of the conversation over time. A session is one sitting — a run
@@ -142,6 +212,8 @@ export interface ConversationRhythm {
   span_days: number;
   active_day_percent: number;
   longest_silence_days: number;
+  /** Silences longer than 48 hours — the conversation stopped, not paused. */
+  silence_count: number;
   late_night_percent: number;
 }
 
@@ -168,6 +240,7 @@ export interface ChatAnalytics {
   avg_response_time_seconds: number | null;
   rhythm: ConversationRhythm;
   balance: Balance;
+  style_matching: StyleMatching;
 }
 
 export interface Decision {

@@ -40,6 +40,11 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("messages", "collective_reference_count", "INTEGER NOT NULL DEFAULT 0"),
     ("messages", "absolutist_count", "INTEGER NOT NULL DEFAULT 0"),
     ("messages", "elongation_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("messages", "is_interrogative", "INTEGER NOT NULL DEFAULT 0"),
+    ("messages", "is_backchannel", "INTEGER NOT NULL DEFAULT 0"),
+    ("messages", "duration_seconds", "INTEGER NOT NULL DEFAULT 0"),
+    ("messages", "hedge_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("messages", "link_count", "INTEGER NOT NULL DEFAULT 0"),
     ("decisions", "engine_metadata", "TEXT NOT NULL DEFAULT '{}'"),
 ]
 

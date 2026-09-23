@@ -22,6 +22,13 @@ class ChatDTO(BaseModel):
         return cls.model_validate(chat)
 
 
+class RederiveSummaryDTO(BaseModel):
+    """What a re-derivation pass rewrote."""
+
+    chat_id: int
+    messages_rewritten: int
+
+
 class ImportSummaryDTO(BaseModel):
     """What an ingestion run produced."""
 

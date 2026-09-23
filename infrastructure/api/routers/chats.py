@@ -5,7 +5,11 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
-from application.dtos.chat_dto import ChatDTO, ImportSummaryDTO
+from application.dtos.chat_dto import (
+    ChatDTO,
+    ImportSummaryDTO,
+    RederiveSummaryDTO,
+)
 from domain.errors import InvalidExportError
 from infrastructure.api.dependencies import ChatServiceDep, IngestionServiceDep
 
@@ -82,3 +86,25 @@ def get_chat(chat_id: int, chat_service: ChatServiceDep) -> ChatDTO:
 )
 def delete_chat(chat_id: int, chat_service: ChatServiceDep) -> None:
     chat_service.delete_chat(chat_id)
+
+
+@router.post(
+    "/{chat_id}/rederive",
+    response_model=RederiveSummaryDTO,
+    summary="Recompute derived columns from the text already stored",
+)
+def rederive_chat(
+    chat_id: int, ingestion_service: IngestionServiceDep
+) -> RederiveSummaryDTO:
+    """Brings a chat imported by an older version up to the current metrics.
+
+    Counts and markers are written at ingest, so a chat imported before a
+    metric existed reads as zero for it. They are all functions of text this
+    database already holds, so this recomputes them in place — no export
+    needed. A voice note's length is the exception: it lives in the export
+    rather than in the text, so it takes a fresh import.
+
+    Declared ``def`` rather than ``async def``: it rewrites every row in the
+    chat, which belongs in a worker thread rather than on the event loop.
+    """
+    return ingestion_service.rederive(chat_id)

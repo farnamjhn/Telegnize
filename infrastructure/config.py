@@ -76,6 +76,28 @@ class Settings:
     uptake_window_seconds: int = field(
         default_factory=lambda: _env_int("UPTAKE_WINDOW_SECONDS", 60 * 60)
     )
+    #: Longest gap still counted as a reply inside a live conversation. The
+    #: windows above run to hours, which counts a reply after a night's sleep
+    #: as a slow one; the active figures narrow to this.
+    active_session_seconds: int = field(
+        default_factory=lambda: _env_int("ACTIVE_SESSION_SECONDS", 2 * 60 * 60)
+    )
+    #: Silence after which the message before it counts as having ended the
+    #: conversation, for the last-word figures.
+    last_word_gap_seconds: int = field(
+        default_factory=lambda: _env_int("LAST_WORD_GAP_SECONDS", 3 * 60 * 60)
+    )
+    #: Silence after which the conversation counts as having stopped rather
+    #: than paused, so whoever writes next is reviving it.
+    silence_seconds: int = field(
+        default_factory=lambda: _env_int("SILENCE_SECONDS", 48 * 60 * 60)
+    )
+    #: Gap inside which two messages count as having been written at once.
+    collision_seconds: int = field(
+        default_factory=lambda: _env_int("COLLISION_SECONDS", 30)
+    )
+    #: Messages in one uninterrupted turn before it counts as a burst.
+    burst_floor: int = field(default_factory=lambda: _env_int("BURST_FLOOR", 3))
 
     #: Messages assessed per call to the assessment endpoint. Each one costs a
     #: blocking run of the question set, so this trades how long a call takes

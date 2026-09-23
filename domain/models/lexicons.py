@@ -116,3 +116,142 @@ COLLECTIVE_REFERENCE_TOKENS: frozenset[str] = frozenset(
         "ازمون", "باهم", "دوتامون",
     }
 )
+
+#: Tentative wording: saying something while leaving room to be wrong.
+#:
+#: Multi-word hedges are matched on their distinctive token, the way the rest
+#: of this module matches: "I guess" on ``guess``, ``فکر کنم`` on ``فکر`` and its
+#: colloquial spelling ``فک``. That makes ``فکر`` a hedge wherever it appears,
+#: including "don't think about it" — the cost of token matching, and the
+#: reason this is a rate to compare between participants rather than a count
+#: that means anything on its own.
+HEDGE_TOKENS: frozenset[str] = frozenset(
+    {
+        # English
+        "maybe", "perhaps", "probably", "possibly", "guess", "might",
+        "suppose", "kinda", "kind", "sorta", "sort", "somewhat",
+        "apparently", "seemingly", "presumably", "arguably", "ish",
+        # Persian
+        "شاید", "احتمالا", "احتمالاً", "احتمال", "ظاهرا", "ظاهراً",
+        "انگار", "انگاری", "نظرم", "فکر", "فک", "گمونم", "گمان",
+        "تقریبا", "تقریباً", "یجورایی", "نمیدونم", "نمی‌دونم",
+    }
+)
+
+#: Short validations that keep a conversation moving without adding to it.
+#:
+#: Matched against the whole message, like :data:`LOW_INVESTMENT_TOKENS`, and
+#: overlapping with it on purpose: the two ask different questions of the same
+#: word. A cold closure is about ending a turn cheaply; a backchannel is about
+#: signalling "still here, go on". ``باشه`` can do either, and is counted under
+#: both.
+BACKCHANNEL_TOKENS: frozenset[str] = frozenset(
+    {
+        # English
+        "ok", "okay", "k", "kk", "yeah", "yep", "yup", "yes", "sure",
+        "alright", "right", "true", "exactly", "aha", "ah", "ahh", "oh",
+        "i see", "gotcha", "mhm", "hmm", "cool", "nice", "same",
+        # Persian
+        "اره", "آره", "اوکی", "اوک", "باشه", "درسته", "دقیقا", "دقیقاً",
+        "حتما", "حتماً", "اهان", "آهان", "اها", "آها", "خب", "خوبه",
+        "ایول", "موافقم", "همینطوره", "بله",
+    }
+)
+
+#: Words that mark a question even where the punctuation does not.
+#:
+#: Persian questions are routinely written without ``؟``, so counting only
+#: question marks undercounts them badly — which is the whole reason this list
+#: exists rather than a regex over punctuation.
+QUESTION_WORD_TOKENS: frozenset[str] = frozenset(
+    {
+        # English
+        "what", "why", "how", "when", "where", "who", "whom", "whose",
+        "which", "whats", "hows", "wheres",
+        # Persian
+        "چرا", "چطور", "چطوری", "چگونه", "کی", "کِی", "کجا", "کجاست",
+        "چیه", "چیست", "چی", "چه", "آیا", "ایا", "چند", "چقدر",
+        "کدوم", "کدام", "مگه", "مگر", "هان",
+    }
+)
+
+#: Function words by category, for Linguistic Style Matching.
+#:
+#: LSM compares how much of each person's writing is made of function words —
+#: the grammatical scaffolding nobody chooses deliberately — rather than what
+#: they are talking about. Ireland & Pennebaker's categories are reproduced
+#: here in the two languages this corpus is written in. Persian is heavily
+#: agglutinative and clitics attach to their host word, so the Persian members
+#: are the free-standing forms the normalizer leaves behind; the category is
+#: therefore undercounted in Persian relative to English, which is why LSM is
+#: only ever compared between two people writing the same mix.
+FUNCTION_WORD_CATEGORIES: dict[str, frozenset[str]] = {
+    "personal_pronouns": frozenset(
+        {
+            "i", "me", "my", "mine", "myself", "im", "ive", "we", "us", "our",
+            "ours", "you", "your", "yours", "he", "him", "his", "she", "her",
+            "hers", "they", "them", "their", "theirs",
+            "من", "منو", "منم", "ما", "مارو", "تو", "توئه", "شما", "او", "اون",
+            "اونا", "آنها", "ایشون", "خودم", "خودت", "خودش", "خودمون",
+        }
+    ),
+    "impersonal_pronouns": frozenset(
+        {
+            "it", "its", "this", "that", "these", "those", "something",
+            "anything", "everything", "nothing", "one", "some", "which",
+            "این", "اون", "آن", "اینا", "اونا", "همین", "همون", "چیزی",
+            "هیچی", "یچیزی", "یه‌چیزی",
+        }
+    ),
+    "articles": frozenset({"a", "an", "the", "یه", "یک"}),
+    "prepositions": frozenset(
+        {
+            "in", "on", "at", "to", "for", "with", "from", "by", "about",
+            "of", "into", "over", "under", "after", "before", "between",
+            "در", "به", "از", "با", "برای", "تا", "روی", "زیر", "بین",
+            "بعد", "قبل", "پیش", "سمت", "طرف", "واسه", "رو",
+        }
+    ),
+    "auxiliary_verbs": frozenset(
+        {
+            "am", "is", "are", "was", "were", "be", "been", "being", "do",
+            "does", "did", "have", "has", "had", "will", "would", "can",
+            "could", "should", "shall", "may", "might", "must",
+            "هست", "هستم", "هستی", "هستیم", "بود", "بودم", "بودی", "باشه",
+            "باشد", "شد", "شده", "میشه", "می‌شه", "باید", "بشه", "داره",
+            "دارم", "داری", "داشت", "کرد", "کنم", "کنی", "کنه",
+        }
+    ),
+    "adverbs": frozenset(
+        {
+            "very", "really", "just", "so", "too", "also", "now", "then",
+            "here", "there", "still", "already", "again", "always", "never",
+            "خیلی", "واقعا", "واقعاً", "فقط", "هم", "الان", "حالا", "بعدش",
+            "اینجا", "اونجا", "هنوز", "دیگه", "باز", "همیشه", "هیچوقت", "کلا",
+        }
+    ),
+    "conjunctions": frozenset(
+        {
+            "and", "but", "or", "so", "because", "if", "when", "while",
+            "although", "though", "than", "that", "as",
+            "و", "ولی", "اما", "یا", "چون", "اگه", "اگر", "وقتی", "که",
+            "پس", "هرچند", "بلکه", "تااینکه",
+        }
+    ),
+    "negations": frozenset(
+        {
+            "no", "not", "never", "none", "nobody", "nothing", "nowhere",
+            "cant", "dont", "didnt", "wont", "isnt", "arent", "wasnt",
+            "نه", "نیست", "نیستم", "نداره", "ندارم", "نکن", "نمیشه",
+            "نمی‌شه", "نمیدونم", "نمی‌دونم", "هیچ", "هیچی", "نخیر",
+        }
+    ),
+    "quantifiers": frozenset(
+        {
+            "all", "some", "any", "many", "much", "more", "most", "few",
+            "little", "lot", "lots", "every", "each", "both", "half",
+            "همه", "بعضی", "خیلی", "چندتا", "چند", "کم", "زیاد", "بیشتر",
+            "کمتر", "هرکدوم", "هردو", "نصف", "تعدادی",
+        }
+    ),
+}
