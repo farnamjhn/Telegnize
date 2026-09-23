@@ -28,6 +28,24 @@ CREATE TABLE IF NOT EXISTS messages (
     char_count       INTEGER NOT NULL DEFAULT 0,
     is_question      INTEGER NOT NULL DEFAULT 0,
     is_cold_closure  INTEGER NOT NULL DEFAULT 0,
+    -- Asks something by punctuation or by wording; a short validation and
+    -- nothing else. Both are whole-message readings, see domain/models.
+    is_interrogative INTEGER NOT NULL DEFAULT 0,
+    is_backchannel   INTEGER NOT NULL DEFAULT 0,
+    -- Length of a voice message or video, as the export reports it.
+    duration_seconds INTEGER NOT NULL DEFAULT 0,
+    -- Expressive markers; see domain/models/lexicons.py for what they mean.
+    exclamation_count          INTEGER NOT NULL DEFAULT 0,
+    emoji_count                INTEGER NOT NULL DEFAULT 0,
+    affection_count            INTEGER NOT NULL DEFAULT 0,
+    apology_count              INTEGER NOT NULL DEFAULT 0,
+    gratitude_count            INTEGER NOT NULL DEFAULT 0,
+    self_reference_count       INTEGER NOT NULL DEFAULT 0,
+    collective_reference_count INTEGER NOT NULL DEFAULT 0,
+    absolutist_count           INTEGER NOT NULL DEFAULT 0,
+    elongation_count           INTEGER NOT NULL DEFAULT 0,
+    hedge_count                INTEGER NOT NULL DEFAULT 0,
+    link_count                 INTEGER NOT NULL DEFAULT 0,
     UNIQUE(chat_id, telegram_msg_id)
 );
 

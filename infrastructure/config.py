@@ -56,7 +56,70 @@ class Settings:
             "CORS_ORIGINS", ["http://localhost:3000", "http://127.0.0.1:3000"]
         )
     )
+    # --- analysis windows -------------------------------------------------
+    # What counts as answering, as one sitting, or as a question still being
+    # live depends on the conversation: colleagues and a couple keep very
+    # different rhythms, so these are settings rather than constants.
+    #: Longest gap still counted as answering an explicit reply, in seconds.
+    reply_window_seconds: int = field(
+        default_factory=lambda: _env_int("REPLY_WINDOW_SECONDS", 24 * 60 * 60)
+    )
+    #: Longest gap still counted as answering the previous turn, in seconds.
+    turn_window_seconds: int = field(
+        default_factory=lambda: _env_int("TURN_WINDOW_SECONDS", 6 * 60 * 60)
+    )
+    #: Silence long enough to treat what follows as a new conversation.
+    session_gap_seconds: int = field(
+        default_factory=lambda: _env_int("SESSION_GAP_SECONDS", 6 * 60 * 60)
+    )
+    #: How long a question stays live for the purpose of counting it answered.
+    uptake_window_seconds: int = field(
+        default_factory=lambda: _env_int("UPTAKE_WINDOW_SECONDS", 60 * 60)
+    )
+    #: Longest gap still counted as a reply inside a live conversation. The
+    #: windows above run to hours, which counts a reply after a night's sleep
+    #: as a slow one; the active figures narrow to this.
+    active_session_seconds: int = field(
+        default_factory=lambda: _env_int("ACTIVE_SESSION_SECONDS", 2 * 60 * 60)
+    )
+    #: Silence after which the message before it counts as having ended the
+    #: conversation, for the last-word figures.
+    last_word_gap_seconds: int = field(
+        default_factory=lambda: _env_int("LAST_WORD_GAP_SECONDS", 3 * 60 * 60)
+    )
+    #: Silence after which the conversation counts as having stopped rather
+    #: than paused, so whoever writes next is reviving it.
+    silence_seconds: int = field(
+        default_factory=lambda: _env_int("SILENCE_SECONDS", 48 * 60 * 60)
+    )
+    #: Gap inside which two messages count as having been written at once.
+    collision_seconds: int = field(
+        default_factory=lambda: _env_int("COLLISION_SECONDS", 30)
+    )
+    #: Messages in one uninterrupted turn before it counts as a burst.
+    burst_floor: int = field(default_factory=lambda: _env_int("BURST_FLOOR", 3))
+
+    #: Messages assessed per call to the assessment endpoint. Each one costs a
+    #: blocking run of the question set, so this trades how long a call takes
+    #: against how much it gets through. Time a page before raising it.
+    assessment_page_size: int = field(
+        default_factory=lambda: _env_int("ASSESSMENT_PAGE_SIZE", 25)
+    )
     #: Load the decision-engine checkpoints at startup instead of on first use.
     preload_decision_engine: bool = field(
         default_factory=lambda: _env("PRELOAD_DECISION_ENGINE", "0") == "1"
+    )
+    #: Checkpoints the decision engine may keep in memory at once. Laya routes
+    #: by script, so a chat that mixes English with anything else alternates
+    #: between two of them; at one, every alternation rebuilds a checkpoint
+    #: from disk before the message can be answered. Lower it only if the
+    #: machine cannot hold both.
+    resident_checkpoints: int = field(
+        default_factory=lambda: _env_int("RESIDENT_CHECKPOINTS", 2)
+    )
+    #: Answers memoised in front of the engine, keyed by state and question
+    #: set, so a message that repeats something already answered costs nothing.
+    #: 0 disables the cache.
+    decision_cache_entries: int = field(
+        default_factory=lambda: _env_int("DECISION_CACHE_ENTRIES", 10_000)
     )

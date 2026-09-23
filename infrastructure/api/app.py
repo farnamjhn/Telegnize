@@ -16,7 +16,14 @@ from fastapi.responses import JSONResponse
 from application.ports.decision_engine import DecisionEngineError
 from domain.errors import InvalidExportError, NotFoundError
 from infrastructure.api.container import Container
-from infrastructure.api.routers import analytics, chats, decisions, health, messages
+from infrastructure.api.routers import (
+    analytics,
+    assessments,
+    chats,
+    decisions,
+    health,
+    messages,
+)
 from infrastructure.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -73,7 +80,13 @@ def create_app(container: Container | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    for router in (chats.router, messages.router, analytics.router, decisions.router):
+    for router in (
+        chats.router,
+        messages.router,
+        analytics.router,
+        decisions.router,
+        assessments.router,
+    ):
         app.include_router(router, prefix=API_PREFIX)
     app.include_router(health.router, prefix=API_PREFIX)
 

@@ -67,8 +67,9 @@ uv run ruff check . --fix
 ```
 
 `tests/test_laya_engine.py` runs real model weights (~40s, needs network on
-first run). Set `TELEGNIZE_SKIP_MODEL_TESTS=1` to skip it; everything that
-depends on the engine is also covered against `tests/fakes.FakeDecisionEngine`.
+first run), so it is skipped by default. Set `TELEGNIZE_SKIP_MODEL_TESTS=0` to
+run it deliberately; everything that depends on the engine is also covered
+against `tests/fakes.FakeDecisionEngine`.
 
 ---
 
@@ -79,18 +80,52 @@ depends on the engine is also covered against `tests/fakes.FakeDecisionEngine`.
    question needs at least two `criteria`; a `score` question needs at least
    two `levels`; a `noul` needs neither. These are validated on construction —
    a malformed question used to crash inside the model.
-2. Cover it in `tests/test_decision_service.py` against the fake engine.
+2. To have it run over a whole chat, add it to `ASSESSMENT_QUESTIONS` and
+   aggregate it in `AssessmentService._participant`. Remember that each
+   question adds inference time to every message in every pass.
+3. Cover it in `tests/test_decision_service.py` or `tests/test_assessment.py`
+   against `FakeDecisionEngine`, which can be given forced answers. Never add a
+   test that loads real weights outside `tests/test_laya_engine.py`.
+
+### Writing about a classified metric
+Metrics the model produces carry more interpretive weight than counted ones,
+and several borrow vocabulary from clinical research. Two rules:
+
+- **Name what was actually measured.** "Messages the classifier read as
+  negative", not "negative messages".
+- **Do not import a threshold with the vocabulary.** Borrowing Gottman's
+  positive-to-negative ratio does not license quoting his 5:1 figure as a
+  target: that number came from coded observation of couples in a lab against
+  measured outcomes, and nothing here reproduces that. Say so wherever the
+  metric is documented.
 
 Callers can also override the question set per request by posting
 `{"questions": {...}}`, which `questions_from_payload` turns into typed
 questions.
 
 ### Adding an analytics metric
-1. Add the field to `ChatAnalytics` and `ChatAnalyticsDTO`.
+1. Add the field to the matching read model in `domain/models/analysis.py`
+   (`Responsiveness`, `Engagement`, `Expression`, `ConversationRhythm`,
+   `Balance`) and to its DTO.
 2. Add an aggregate method to `IMessageRepository` and implement it as a query
    in `SQLiteMessageRepository`. Do not add a Python loop over a whole chat.
 3. Assert on it in `tests/test_analytics.py`, and on the query itself in
    `tests/test_sqlite_repositories.py`.
+4. Document it in `docs/analytics.md`, including what it cannot tell you.
+
+Two rules specific to this area:
+
+- **Normalise for verbosity.** A raw count of anything mostly measures who
+  writes more. Report a rate per thousand words, or a share, alongside it.
+- **Check the metric does not saturate.** A threshold generous enough that
+  every participant scores 100% carries no information. Try it against a real
+  export before settling on the window.
+
+### Adding a word marker
+Add the token to the right set in `domain/models/lexicons.py`, add a counter to
+`MessageMarkers` and a column if it is a new category, and add the migration
+entry. Keep the module docstring's honesty note intact: these lists describe
+wording, and the documentation must not let them read as a score of anyone.
 
 ### Changing the database schema
 1. Edit `infrastructure/persistence/schema.sql`. Every statement must be
@@ -105,7 +140,68 @@ container. `IngestionService` does not change.
 
 ---
 
-## 4. Conventions
+## 4. The frontend
+
+`frontend/` is a React + TypeScript app (Vite). It is an API client and
+nothing more — no analysis happens there. If the UI needs a number, add it to
+the analytics aggregate and serve it; do not compute it over a page of
+messages in the browser.
+
+```
+src/lib/        api client, DTO mirrors, formatting, hooks
+src/components/ primitives, the app shell, the chart layer
+src/views/      one file per section
+src/styles/     tokens.css (the theme) + base.css (everything else)
+```
+
+- **Types mirror the DTOs.** `src/lib/types.ts` is the wire shape of
+  `application/dtos/`. Change a DTO, change that file — `npm --prefix frontend
+  run typecheck` then names every view that has drifted.
+- **The participant tables follow the DTO groups.** Volume, responsiveness,
+  engagement and expression are one table each behind a toggle, mirroring
+  `ParticipantStatsDTO`'s nesting and the sections of
+  [analytics.md](analytics.md). A new metric goes in the group it belongs to,
+  and that document's caveat goes into the table's subtitle — these figures are
+  easy to over-read, and the UI must not help.
+- **A metric with no data says so.** Marker columns are written at ingest, so a
+  chat imported before a metric existed reads as all-zero. The Expression table
+  detects that and explains it rather than showing a wall of zeros.
+- **Counted and classified figures never share a view.** Analytics holds what
+  was counted; Assessment holds what the model read, behind its own coverage
+  figure. Do not promote an assessment number into an Analytics tile — the
+  whole point of the split is that the reader can tell which kind they are
+  looking at.
+- **Expensive work is driven by the user, one page at a time.** The assessment
+  pass can run for hours on a large chat, so the UI has no "assess everything"
+  button. It assesses one page per click, shows where to resume, and states the
+  cost before the first run.
+- **Plain CSS, one dark theme.** Every colour, radius and duration is a custom
+  property in `tokens.css`; components reference roles, never raw hex. There is
+  no CSS framework and no component library — a new widget is a class in
+  `base.css`.
+- **Charts follow the house rules.** A single-series chart is one colour with
+  no legend (the card title names it). Categorical charts use the three fixed
+  series slots in order — white, orange, grey — and fold the tail into
+  "+N more"; never add a fourth. The slots separate by lightness rather than
+  hue, which survives colour blindness but makes the swatch weak identity, so a
+  legend and a table view are mandatory. Bars cap at 24px with a rounded
+  data-end and gridlines are solid hairlines.
+- **Orange is reserved.** It is the alarm end of a scale — errors, destructive
+  actions, low confidence — and the only chromatic colour in the system. Using
+  it decoratively costs it its meaning.
+- **Persian is first-class here too.** Message text gets its direction from
+  `directionOf`, which reads the language tag and falls back to the script.
+- **Filters live in one row above what they scope**, never inside a card, and a
+  refetch holds the previous render at reduced opacity rather than flashing a
+  skeleton.
+
+```bash
+npm --prefix frontend run typecheck
+```
+
+---
+
+## 5. Conventions
 
 - **Branches**: `feat/…`, `fix/…`, `perf/…`, `docs/…`.
 - **Commits**: Conventional Commits, e.g. `feat(decisions): add escalation
@@ -119,7 +215,7 @@ container. `IngestionService` does not change.
 
 ---
 
-## 5. Troubleshooting
+## 6. Troubleshooting
 
 **Slow or rate-limited Laya downloads.** Set `HF_TOKEN`; weights cache in
 `~/.cache/huggingface/hub/` after the first run. Set
