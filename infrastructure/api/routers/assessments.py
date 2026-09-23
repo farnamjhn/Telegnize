@@ -31,8 +31,9 @@ def assess_chat_page(
 ) -> AssessmentProgressDTO:
     """Runs the question set over a page, skipping messages already answered.
 
-    Expect this to take roughly a fifth of a second per unassessed message.
-    Call it again with the returned ``next_offset`` until ``is_complete``.
+    How long that takes is a property of the machine, not of this endpoint, so
+    time one small page before committing to a long run. Call it again with the
+    returned ``next_offset`` until ``is_complete``.
     """
     return assessment_service.assess_page(chat_id, offset=offset, limit=limit)
 

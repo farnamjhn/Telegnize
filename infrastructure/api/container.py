@@ -22,6 +22,7 @@ from domain.repository.chat_repository import IChatRepository
 from domain.repository.decision_repository import IDecisionRepository
 from domain.repository.message_repository import IMessageRepository
 from infrastructure.config import Settings
+from infrastructure.decision_engine.caching_engine import CachingDecisionEngine
 from infrastructure.decision_engine.laya_engine import LayaDecisionEngine
 from infrastructure.nlp.normalizer import get_normalizer
 from infrastructure.parser.telegram_parser import TelegramJsonParser
@@ -56,7 +57,22 @@ class Container:
 
     @cached_property
     def decision_engine(self) -> IDecisionEngine:
-        return LayaDecisionEngine(preload=self.settings.preload_decision_engine)
+        """The engine, behind an answer cache unless one is configured away.
+
+        The cache belongs here rather than inside the adapter: it is true of
+        any engine that the same question about the same state has the same
+        answer, and holding it at the composition root is what lets one cache
+        serve every service that asks.
+        """
+        engine: IDecisionEngine = LayaDecisionEngine(
+            preload=self.settings.preload_decision_engine,
+            resident_checkpoints=self.settings.resident_checkpoints,
+        )
+        if self.settings.decision_cache_entries <= 0:
+            return engine
+        return CachingDecisionEngine(
+            engine, max_entries=self.settings.decision_cache_entries
+        )
 
     # --- repositories -----------------------------------------------------
     @cached_property

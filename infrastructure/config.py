@@ -87,3 +87,17 @@ class Settings:
     preload_decision_engine: bool = field(
         default_factory=lambda: _env("PRELOAD_DECISION_ENGINE", "0") == "1"
     )
+    #: Checkpoints the decision engine may keep in memory at once. Laya routes
+    #: by script, so a chat that mixes English with anything else alternates
+    #: between two of them; at one, every alternation rebuilds a checkpoint
+    #: from disk before the message can be answered. Lower it only if the
+    #: machine cannot hold both.
+    resident_checkpoints: int = field(
+        default_factory=lambda: _env_int("RESIDENT_CHECKPOINTS", 2)
+    )
+    #: Answers memoised in front of the engine, keyed by state and question
+    #: set, so a message that repeats something already answered costs nothing.
+    #: 0 disables the cache.
+    decision_cache_entries: int = field(
+        default_factory=lambda: _env_int("DECISION_CACHE_ENTRIES", 10_000)
+    )
