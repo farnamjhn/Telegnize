@@ -87,6 +87,9 @@ class Container:
             turn_window_seconds=self.settings.turn_window_seconds,
             session_gap_seconds=self.settings.session_gap_seconds,
             uptake_window_seconds=self.settings.uptake_window_seconds,
+            silence_seconds=self.settings.silence_seconds,
+            collision_seconds=self.settings.collision_seconds,
+            burst_floor=self.settings.burst_floor,
         )
 
     @cached_property
@@ -113,7 +116,12 @@ class Container:
 
     @cached_property
     def analytics_service(self) -> AnalyticsService:
-        return AnalyticsService(self.chat_repository, self.message_repository)
+        return AnalyticsService(
+            self.chat_repository,
+            self.message_repository,
+            active_session_seconds=self.settings.active_session_seconds,
+            last_word_gap_seconds=self.settings.last_word_gap_seconds,
+        )
 
     @cached_property
     def assessment_service(self) -> AssessmentService:

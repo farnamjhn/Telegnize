@@ -53,6 +53,7 @@ curl localhost:8000/api/analytics/1
 | `POST` `GET` | `/api/decisions/messages/{id}` | Evaluate a message, or read the cache |
 | `POST` `GET` | `/api/decisions/chats/{id}` | Evaluate a conversation window |
 | `POST` `GET` | `/api/assessments/{chat_id}` | Run a [relational assessment](docs/analytics.md) pass, or read it |
+| `POST` | `/api/chats/{chat_id}/rederive` | Recompute derived columns from the text already stored |
 | `POST` | `/api/decisions/custom` | Ask arbitrary typed questions |
 | `GET` | `/api/health` | Service and dependency status |
 
@@ -102,12 +103,15 @@ the system.
 
 ## Analytics
 
-**Counted** — exact arithmetic over timestamps and words. Per participant: how
-readily they answer and whether that is drifting week by week, who opens and
-closes conversations, how they hold the floor, and what their wording carries
-(affection, apology, gratitude, absolutism, elongation, emoji, "we" against
-"I"). Chat-wide: the rhythm of sittings and silences, and how evenly the
-conversation is shared.
+**Counted** — exact arithmetic over timestamps and words. Per participant: what
+hours they keep and how fast they answer while the conversation is live, who
+opens and closes it and who revives it after days of nothing, how they hold the
+floor (bursts, last word, messages that crossed in flight), what their
+messages are made of (vocabulary, media, voice, links), and what their wording
+carries — affection, apology, gratitude, absolutism, hedging, questions asked,
+"we" against "I". Chat-wide: the rhythm of sittings and silences, how evenly
+the conversation is shared, and how far the two participants' function-word use
+converges.
 
 **Classified** — a model's reading of each message, under
 `/api/assessments`: emotional valence and the positive-to-negative ratio, bids
@@ -137,6 +141,11 @@ Every setting is an environment variable prefixed `TELEGNIZE_`:
 | `TELEGNIZE_TURN_WINDOW_SECONDS` | `21600` | Gap still counted as answering a turn |
 | `TELEGNIZE_SESSION_GAP_SECONDS` | `21600` | Silence that starts a new session |
 | `TELEGNIZE_UPTAKE_WINDOW_SECONDS` | `3600` | How long a question stays live |
+| `TELEGNIZE_ACTIVE_SESSION_SECONDS` | `7200` | Gap still counted as a reply inside a live conversation |
+| `TELEGNIZE_LAST_WORD_GAP_SECONDS` | `10800` | Silence after which the message before it ended the conversation |
+| `TELEGNIZE_SILENCE_SECONDS` | `172800` | Silence after which the conversation counts as stopped |
+| `TELEGNIZE_COLLISION_SECONDS` | `30` | Gap inside which two messages count as written at once |
+| `TELEGNIZE_BURST_FLOOR` | `3` | Messages in one turn before it counts as a burst |
 | `TELEGNIZE_ASSESSMENT_PAGE_SIZE` | `25` | Messages assessed per call |
 | `TELEGNIZE_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated browser origins — the default is where `frontend/` dev-serves |
 | `TELEGNIZE_PRELOAD_DECISION_ENGINE` | `0` | `1` loads model weights at startup |

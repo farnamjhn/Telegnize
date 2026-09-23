@@ -15,12 +15,21 @@ from statistics import fmean, median
 from application.dtos.analysis_dto import (
     BalanceDTO,
     ChatAnalyticsDTO,
+    CircadianDTO,
+    CompositionDTO,
+    ControlDTO,
     ConversationRhythmDTO,
     EngagementDTO,
     ExpressionDTO,
     LatencyPointDTO,
     ParticipantStatsDTO,
     ResponsivenessDTO,
+    StanceDTO,
+    StyleMatchingDTO,
+)
+from application.services.lexical_profile import (
+    SenderVocabulary,
+    build_lexical_profile,
 )
 from domain.errors import ChatNotFoundError
 from domain.repository.chat_repository import IChatRepository
@@ -38,13 +47,33 @@ _MONTHLY_TREND_ABOVE_DAYS = 180
 _WEEKLY_PERIOD_FORMAT = "%Y-W%W"
 _MONTHLY_PERIOD_FORMAT = "%Y-%m"
 
+#: Longest gap still counted as a reply inside a live conversation.
+#:
+#: The ordinary reply windows run to hours, so the median they produce counts
+#: someone answering after a night's sleep as a slow reply. Narrowed to this,
+#: the same statistic is about how quickly someone answers while the
+#: conversation is actually happening.
+DEFAULT_ACTIVE_SESSION_SECONDS = 2 * 60 * 60
+
+#: Silence after which the last message before it counts as having ended the
+#: conversation. Tighter than the session gap on purpose: leaving a message
+#: unanswered for three hours is the behaviour being counted, and a six-hour
+#: threshold misses most of it.
+DEFAULT_LAST_WORD_GAP_SECONDS = 3 * 60 * 60
+
 
 class AnalyticsService:
     def __init__(
-        self, chat_repo: IChatRepository, message_repo: IMessageRepository
+        self,
+        chat_repo: IChatRepository,
+        message_repo: IMessageRepository,
+        active_session_seconds: int = DEFAULT_ACTIVE_SESSION_SECONDS,
+        last_word_gap_seconds: int = DEFAULT_LAST_WORD_GAP_SECONDS,
     ) -> None:
         self._chats = chat_repo
         self._messages = message_repo
+        self._active_session = active_session_seconds
+        self._last_word_gap = last_word_gap_seconds
 
     def compute_chat_analytics(self, chat_id: int) -> ChatAnalyticsDTO:
         """Builds the analytics profile for one chat.
@@ -74,8 +103,26 @@ class AnalyticsService:
         hourly = self._messages.get_hourly_distribution(chat_id)
         first_seen, last_seen = self._messages.get_date_range(chat_id)
 
+        hourly_by_sender = self._messages.get_hourly_by_sender(chat_id)
+        active = self._messages.get_response_latencies(
+            chat_id, within_seconds=self._active_session
+        )
+        silences = self._messages.get_silence_breaks(chat_id)
+        bursts = self._messages.get_burst_profile(chat_id)
+        collisions = self._messages.get_collisions(chat_id)
+        endings = self._messages.get_session_boundaries(
+            chat_id, gap_seconds=self._last_word_gap
+        )
+        lexical = build_lexical_profile(self._messages.iter_analysis_texts(chat_id))
+
         total_openings = sum(
             int(row.get("opened_count") or 0) for row in boundaries.values()
+        )
+        total_revivals = sum(
+            int(row.get("revived_count") or 0) for row in silences.values()
+        )
+        total_endings = sum(
+            int(row.get("closed_count") or 0) for row in endings.values()
         )
 
         participants = [
@@ -89,6 +136,15 @@ class AnalyticsService:
                 turns=turn_taking.get(row["sender_id"], {}),
                 uptake=uptake.get(row["sender_id"], {}),
                 boundaries=boundaries.get(row["sender_id"], {}),
+                hours=hourly_by_sender.get(row["sender_id"], {}),
+                active_latencies=active.get(row["sender_id"], []),
+                silence=silences.get(row["sender_id"], {}),
+                total_revivals=total_revivals,
+                burst=bursts.get(row["sender_id"], {}),
+                collisions=int(collisions.get(row["sender_id"], 0)),
+                ending=endings.get(row["sender_id"], {}),
+                total_endings=total_endings,
+                vocabulary=lexical.by_sender.get(row["sender_id"]),
             )
             for row in totals
         ]
@@ -107,8 +163,13 @@ class AnalyticsService:
             daily_distribution=self._messages.get_daily_distribution(chat_id),
             language_breakdown=self._messages.get_language_distribution(chat_id),
             avg_response_time_seconds=_rounded_mean(all_latencies),
-            rhythm=self._rhythm(chat_id, hourly, total_messages),
+            rhythm=self._rhythm(chat_id, hourly, total_messages, total_revivals),
             balance=self._balance(participants),
+            style_matching=StyleMatchingDTO(
+                lsm_percent=lexical.style_matching.lsm_percent,
+                by_category=lexical.style_matching.by_category,
+                turn_pairs=lexical.style_matching.turn_pairs,
+            ),
         )
 
     # --- participants -----------------------------------------------------
@@ -124,6 +185,15 @@ class AnalyticsService:
         turns: Mapping[str, int],
         uptake: Mapping[str, int],
         boundaries: Mapping[str, int],
+        hours: Mapping[int, int],
+        active_latencies: Sequence[float],
+        silence: Mapping[str, float],
+        total_revivals: int,
+        burst: Mapping[str, float],
+        collisions: int,
+        ending: Mapping[str, int],
+        total_endings: int,
+        vocabulary: SenderVocabulary | None,
     ) -> ParticipantStatsDTO:
         message_count = int(row["message_count"])
         word_count = int(row["word_count"] or 0)
@@ -142,6 +212,14 @@ class AnalyticsService:
                 row, message_count, total_openings, turns, boundaries
             ),
             expression=self._expression(row, word_count),
+            circadian=self._circadian(
+                hours, message_count, active_latencies, silence, total_revivals
+            ),
+            control=self._control(
+                burst, collisions, message_count, ending, total_endings
+            ),
+            composition=self._composition(row, message_count, vocabulary),
+            stance=self._stance(row, message_count, word_count),
         )
 
     @staticmethod
@@ -248,6 +326,115 @@ class AnalyticsService:
             ),
         )
 
+    @staticmethod
+    def _circadian(
+        hours: Mapping[int, int],
+        message_count: int,
+        active_latencies: Sequence[float],
+        silence: Mapping[str, float],
+        total_revivals: int,
+    ) -> CircadianDTO:
+        """When this participant writes, and how fast they answer while awake."""
+        night = sum(hours.get(hour, 0) for hour in LATE_NIGHT_HOURS)
+        revived = int(silence.get("revived_count") or 0)
+        return CircadianDTO(
+            hourly_distribution=dict(sorted(hours.items())),
+            night_owl_percent=_percent(night, message_count),
+            peak_hour=max(hours, key=lambda h: hours[h]) if hours else None,
+            active_median_seconds=(
+                round(median(active_latencies), _ROUNDING) if active_latencies else None
+            ),
+            active_p90_seconds=_percentile(active_latencies, 0.9),
+            active_reply_count=len(active_latencies),
+            revived_count=revived,
+            revived_percent=(
+                _percent(revived, total_revivals) if total_revivals else None
+            ),
+        )
+
+    @staticmethod
+    def _control(
+        burst: Mapping[str, float],
+        collisions: int,
+        message_count: int,
+        ending: Mapping[str, int],
+        total_endings: int,
+    ) -> ControlDTO:
+        """Who sets the pace, and who is left holding the last message."""
+        burst_count = int(burst.get("burst_count") or 0)
+        long_bursts = int(burst.get("long_burst_count") or 0)
+        last_word = int(ending.get("closed_count") or 0)
+        return ControlDTO(
+            burst_count=burst_count,
+            long_burst_count=long_bursts,
+            long_burst_percent=_percent(long_bursts, burst_count),
+            longest_burst=int(burst.get("longest_burst") or 0),
+            avg_burst_size=round(float(burst.get("avg_burst_size") or 0.0), _ROUNDING),
+            last_word_count=last_word,
+            last_word_percent=(
+                _percent(last_word, total_endings) if total_endings else None
+            ),
+            collision_count=collisions,
+            collision_percent=_percent(collisions, message_count),
+        )
+
+    @staticmethod
+    def _composition(
+        row: Mapping[str, object],
+        message_count: int,
+        vocabulary: SenderVocabulary | None,
+    ) -> CompositionDTO:
+        """What the messages are made of: words, media, voice."""
+        media = int(row.get("media_count") or 0)
+        voice = int(row.get("voice_count") or 0)
+        voice_seconds = int(row.get("voice_seconds") or 0)
+        timed_voice = int(row.get("timed_voice_count") or 0)
+        words = vocabulary or SenderVocabulary()
+        return CompositionDTO(
+            unique_word_count=words.unique_count,
+            type_token_ratio=words.type_token_ratio,
+            lexical_diversity=words.lexical_diversity,
+            text_message_count=int(row.get("text_count") or 0),
+            media_message_count=media + voice,
+            media_percent=_percent(media + voice, message_count),
+            link_count=int(row.get("link_count") or 0),
+            voice_message_count=voice,
+            voice_seconds=voice_seconds,
+            # Averaged over the notes that carry a duration, not over all of
+            # them: a chat imported before durations were read has voice notes
+            # and no seconds, and dividing by the wrong denominator would
+            # report that as very short messages rather than as no data.
+            avg_voice_seconds=(
+                round(voice_seconds / timed_voice, _ROUNDING) if timed_voice else None
+            ),
+            timed_voice_count=timed_voice,
+        )
+
+    @staticmethod
+    def _stance(
+        row: Mapping[str, object], message_count: int, word_count: int
+    ) -> StanceDTO:
+        """Asking, hedging, and going along with what the other person said."""
+        interrogatives = int(row.get("interrogative_count") or 0)
+        hedges = int(row.get("hedge_count") or 0)
+        backchannels = int(row.get("backchannel_count") or 0)
+        return StanceDTO(
+            interrogative_count=interrogatives,
+            questions_per_100_messages=(
+                round(interrogatives / message_count * 100, _ROUNDING)
+                if message_count
+                else 0.0
+            ),
+            hedge_count=hedges,
+            hedge_per_1k_words=(
+                round(hedges / word_count * _WORDS_PER_RATE_UNIT, _ROUNDING)
+                if word_count
+                else 0.0
+            ),
+            backchannel_count=backchannels,
+            backchannel_percent=_percent(backchannels, message_count),
+        )
+
     def _period_format(self, chat_id: int) -> str:
         """Picks week or month buckets to suit how long the chat runs."""
         shape = self._messages.get_session_shape(chat_id)
@@ -260,7 +447,11 @@ class AnalyticsService:
 
     # --- chat-level -------------------------------------------------------
     def _rhythm(
-        self, chat_id: int, hourly: Mapping[int, int], total_messages: int
+        self,
+        chat_id: int,
+        hourly: Mapping[int, int],
+        total_messages: int,
+        silence_count: int = 0,
     ) -> ConversationRhythmDTO:
         shape = self._messages.get_session_shape(chat_id)
         active_days = int(shape.get("active_days") or 0)
@@ -283,6 +474,7 @@ class AnalyticsService:
                 float(shape.get("longest_silence_days") or 0.0), _ROUNDING
             ),
             late_night_percent=_percent(late_night, total_messages),
+            silence_count=silence_count,
         )
 
     @staticmethod

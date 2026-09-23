@@ -177,6 +177,50 @@ class TestChatImport(APITestCase):
         self.assertEqual(response.status_code, 404)
 
 
+class TestRederive(APITestCase):
+    """Bringing a chat imported by an older version up to the current metrics."""
+
+    def upload(self):
+        return self.client.post(
+            "/api/chats/upload",
+            files={"file": ("export.json", PERSIAN_EXPORT, "application/json")},
+        ).json()["chat"]["id"]
+
+    def stance_of(self, chat_id, sender_id):
+        analytics = self.client.get(f"/api/analytics/{chat_id}").json()
+        return next(
+            p["stance"]
+            for p in analytics["participants"]
+            if p["sender_id"] == sender_id
+        )
+
+    def test_it_recomputes_markers_an_older_import_never_wrote(self):
+        chat_id = self.upload()
+        before = self.stance_of(chat_id, "user_farnam")
+        self.assertEqual(before["interrogative_count"], 1)
+
+        # Exactly what a database written before the column existed looks like:
+        # the text is there, the derived column is not.
+        with self.container.database.connect() as conn:
+            conn.execute("UPDATE messages SET is_interrogative = 0;")
+        self.assertEqual(self.stance_of(chat_id, "user_farnam")["interrogative_count"], 0)
+
+        response = self.client.post(f"/api/chats/{chat_id}/rederive")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["messages_rewritten"], 2)
+        self.assertEqual(self.stance_of(chat_id, "user_farnam")["interrogative_count"], 1)
+
+    def test_it_does_not_disturb_the_text_it_reads(self):
+        chat_id = self.upload()
+        listing = f"/api/messages?chat_id={chat_id}"
+        before = self.client.get(listing).json()
+        self.client.post(f"/api/chats/{chat_id}/rederive")
+        self.assertEqual(self.client.get(listing).json(), before)
+
+    def test_an_unknown_chat_is_a_404(self):
+        self.assertEqual(self.client.post("/api/chats/9999/rederive").status_code, 404)
+
+
 class TestAnalyticsEndpoint(APITestCase):
     def test_analytics_for_an_imported_chat(self):
         chat_id = self.client.post(

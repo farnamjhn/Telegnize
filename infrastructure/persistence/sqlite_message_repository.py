@@ -13,9 +13,10 @@ _COLUMNS = (
     "chat_id, telegram_msg_id, sender_id, sender_name, timestamp, "
     "text_content, normalized_text, language, content_type, reply_to_msg_id, "
     "is_forwarded, word_count, char_count, is_question, is_cold_closure, "
+    "is_interrogative, is_backchannel, duration_seconds, "
     "exclamation_count, emoji_count, affection_count, apology_count, "
     "gratitude_count, self_reference_count, collective_reference_count, "
-    "absolutist_count, elongation_count"
+    "absolutist_count, elongation_count, hedge_count, link_count"
 )
 _PLACEHOLDERS = ", ".join(f":{name.strip()}" for name in _COLUMNS.split(","))
 _UPDATES = ", ".join(
@@ -269,6 +270,87 @@ _SESSION_SHAPE = """
 """
 
 
+# Per sender, how their messages fall across the hours of the day. The chat-wide
+# version cannot answer this: two people on opposite schedules average out into
+# a flat distribution that describes neither of them.
+_HOURLY_BY_SENDER = """
+    SELECT
+        sender_id,
+        CAST(strftime('%H', timestamp) AS INTEGER) AS hour,
+        COUNT(*) AS total
+    FROM messages
+    WHERE chat_id = :chat_id
+    GROUP BY sender_id, hour;
+"""
+
+# Silences long enough to count as the conversation having stopped, and who
+# started it again. The reviver is whoever sent the message that ended the
+# silence — the gap is measured backwards from their message.
+_SILENCE_BREAKS = """
+    WITH ordered AS (
+        SELECT
+            sender_id,
+            timestamp,
+            LAG(timestamp) OVER turn AS prev_timestamp
+        FROM messages
+        WHERE chat_id = :chat_id
+        WINDOW turn AS (ORDER BY timestamp, id)
+    )
+    SELECT
+        sender_id,
+        COUNT(*) AS revived_count,
+        MAX((julianday(timestamp) - julianday(prev_timestamp))) AS longest_days
+    FROM ordered
+    WHERE prev_timestamp IS NOT NULL
+      AND (julianday(timestamp) - julianday(prev_timestamp)) * 86400.0 > :silence
+    GROUP BY sender_id;
+"""
+
+# Per sender, the shape of their turns: how many they take, how many run to
+# three messages or more before the other person says anything, and the longest
+# one. A burst of three is the point at which writing again stops reading as an
+# afterthought and starts reading as a pattern.
+_BURST_PROFILE = f"""
+    WITH {_BURSTS_CTE},
+    sized AS (
+        SELECT burst_no, sender_id, COUNT(*) AS size
+        FROM bursts
+        GROUP BY burst_no, sender_id
+    )
+    SELECT
+        sender_id,
+        COUNT(*)                                          AS burst_count,
+        SUM(CASE WHEN size >= :burst_floor THEN 1 ELSE 0 END) AS long_burst_count,
+        MAX(size)                                         AS longest_burst,
+        AVG(size)                                         AS avg_burst_size
+    FROM sized
+    GROUP BY sender_id;
+"""
+
+# Messages sent so soon after the other person's that the two were plainly being
+# written at the same time. Same-sender runs are excluded: writing twice in ten
+# seconds is a burst, which is counted separately and means something else.
+_COLLISIONS = """
+    WITH ordered AS (
+        SELECT
+            sender_id,
+            timestamp,
+            LAG(sender_id) OVER turn AS prev_sender_id,
+            LAG(timestamp) OVER turn AS prev_timestamp
+        FROM messages
+        WHERE chat_id = :chat_id
+        WINDOW turn AS (ORDER BY timestamp, id)
+    )
+    SELECT sender_id, COUNT(*) AS collision_count
+    FROM ordered
+    WHERE prev_sender_id IS NOT NULL
+      AND prev_sender_id <> sender_id
+      AND (julianday(timestamp) - julianday(prev_timestamp)) * 86400.0
+          BETWEEN 0 AND :window
+    GROUP BY sender_id;
+"""
+
+
 # SQLite's %w is 0=Sunday; Telegnize reports weekday names.
 _WEEKDAYS = (
     "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
@@ -285,6 +367,13 @@ DEFAULT_TURN_WINDOW_SECONDS = 6 * 60 * 60
 DEFAULT_SESSION_GAP_SECONDS = 6 * 60 * 60
 #: How long a question stays live for the purpose of counting it answered.
 DEFAULT_UPTAKE_WINDOW_SECONDS = 60 * 60
+#: Silence after which the conversation counts as having stopped rather than
+#: paused, so that whoever writes next is reviving it.
+DEFAULT_SILENCE_SECONDS = 48 * 60 * 60
+#: Gap inside which two messages count as having been written at once.
+DEFAULT_COLLISION_SECONDS = 30
+#: Messages in one uninterrupted turn before it counts as a burst.
+DEFAULT_BURST_FLOOR = 3
 
 
 class SQLiteMessageRepository(IMessageRepository):
@@ -295,12 +384,18 @@ class SQLiteMessageRepository(IMessageRepository):
         turn_window_seconds: int = DEFAULT_TURN_WINDOW_SECONDS,
         session_gap_seconds: int = DEFAULT_SESSION_GAP_SECONDS,
         uptake_window_seconds: int = DEFAULT_UPTAKE_WINDOW_SECONDS,
+        silence_seconds: int = DEFAULT_SILENCE_SECONDS,
+        collision_seconds: int = DEFAULT_COLLISION_SECONDS,
+        burst_floor: int = DEFAULT_BURST_FLOOR,
     ) -> None:
         self._db = database
         self._reply_window = reply_window_seconds
         self._turn_window = turn_window_seconds
         self._session_gap = session_gap_seconds
         self._uptake_window = uptake_window_seconds
+        self._silence = silence_seconds
+        self._collision_window = collision_seconds
+        self._burst_floor = burst_floor
 
     # --- mapping ----------------------------------------------------------
     @staticmethod
@@ -318,6 +413,7 @@ class SQLiteMessageRepository(IMessageRepository):
             content_type=ContentType.coerce(row["content_type"]),
             reply_to_msg_id=row["reply_to_msg_id"],
             is_forwarded=bool(row["is_forwarded"]),
+            duration_seconds=_column(row, "duration_seconds"),
         )
 
     @staticmethod
@@ -339,6 +435,9 @@ class SQLiteMessageRepository(IMessageRepository):
             "char_count": message.char_count,
             "is_question": int(message.is_question),
             "is_cold_closure": int(message.is_cold_closure),
+            "is_interrogative": int(message.is_interrogative),
+            "is_backchannel": int(message.is_backchannel),
+            "duration_seconds": int(message.duration_seconds or 0),
             "exclamation_count": markers.exclamations,
             "emoji_count": markers.emoji,
             "affection_count": markers.affection,
@@ -348,6 +447,8 @@ class SQLiteMessageRepository(IMessageRepository):
             "collective_reference_count": markers.collective_reference,
             "absolutist_count": markers.absolutist,
             "elongation_count": markers.elongation,
+            "hedge_count": markers.hedge,
+            "link_count": markers.link,
         }
 
     # --- writes -----------------------------------------------------------
@@ -455,8 +556,21 @@ class SQLiteMessageRepository(IMessageRepository):
                     SUM(collective_reference_count) AS collective_reference_count,
                     SUM(absolutist_count)           AS absolutist_count,
                     SUM(elongation_count)           AS elongation_count,
+                    SUM(hedge_count)                AS hedge_count,
+                    SUM(link_count)                 AS link_count,
+                    SUM(is_interrogative)           AS interrogative_count,
+                    SUM(is_backchannel)             AS backchannel_count,
+                    SUM(content_type = 'text')                         AS text_count,
                     SUM(content_type = 'voice_message')                AS voice_count,
-                    SUM(content_type NOT IN ('text', 'voice_message')) AS media_count
+                    SUM(content_type NOT IN ('text', 'voice_message')) AS media_count,
+                    -- Durations only exist for chats imported since they were
+                    -- read, so the count of voice notes that carry one is kept
+                    -- alongside the total: an average over zero is not zero.
+                    SUM(CASE WHEN content_type = 'voice_message'
+                             THEN duration_seconds ELSE 0 END)         AS voice_seconds,
+                    SUM(CASE WHEN content_type = 'voice_message'
+                              AND duration_seconds > 0
+                             THEN 1 ELSE 0 END)              AS timed_voice_count
                 FROM messages
                 WHERE chat_id = ?
                 GROUP BY sender_id
@@ -538,13 +652,70 @@ class SQLiteMessageRepository(IMessageRepository):
             ).fetchall()
         return {row["sender_id"]: dict(row) for row in rows}
 
-    def get_session_boundaries(self, chat_id: int) -> dict[str, dict[str, int]]:
+    def get_session_boundaries(
+        self, chat_id: int, gap_seconds: int | None = None
+    ) -> dict[str, dict[str, int]]:
         with self._db.connect() as conn:
             rows = conn.execute(
                 _SESSION_BOUNDARIES,
-                {"chat_id": chat_id, "session_gap": self._session_gap},
+                {
+                    "chat_id": chat_id,
+                    "session_gap": (
+                        gap_seconds if gap_seconds is not None else self._session_gap
+                    ),
+                },
             ).fetchall()
         return {row["sender_id"]: dict(row) for row in rows}
+
+    # --- behavioural aggregates ------------------------------------------
+    def get_hourly_by_sender(self, chat_id: int) -> dict[str, dict[int, int]]:
+        hours: dict[str, dict[int, int]] = {}
+        with self._db.connect() as conn:
+            for row in conn.execute(_HOURLY_BY_SENDER, {"chat_id": chat_id}):
+                if row["hour"] is not None:
+                    hours.setdefault(row["sender_id"], {})[row["hour"]] = row["total"]
+        return hours
+
+    def get_silence_breaks(self, chat_id: int) -> dict[str, dict[str, float]]:
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                _SILENCE_BREAKS, {"chat_id": chat_id, "silence": self._silence}
+            ).fetchall()
+        return {row["sender_id"]: dict(row) for row in rows}
+
+    def get_burst_profile(self, chat_id: int) -> dict[str, dict[str, float]]:
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                _BURST_PROFILE,
+                {"chat_id": chat_id, "burst_floor": self._burst_floor},
+            ).fetchall()
+        return {row["sender_id"]: dict(row) for row in rows}
+
+    def get_collisions(self, chat_id: int) -> dict[str, int]:
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                _COLLISIONS,
+                {"chat_id": chat_id, "window": self._collision_window},
+            ).fetchall()
+        return {row["sender_id"]: int(row["collision_count"]) for row in rows}
+
+    def iter_analysis_texts(self, chat_id: int) -> Iterator[tuple[str, str]]:
+        """Streams (sender_id, text) in order, without building entities.
+
+        The only read here that is not an aggregate. Vocabulary and style
+        matching are about which words were used, which SQL cannot answer
+        without a tokenizer; this keeps the cost to one pass and one row in
+        memory at a time rather than materialising the chat.
+        """
+        with self._db.connect() as conn:
+            cursor = conn.execute(
+                "SELECT sender_id, "
+                "COALESCE(NULLIF(normalized_text, ''), text_content) AS text "
+                "FROM messages WHERE chat_id = ? ORDER BY timestamp ASC, id ASC;",
+                (chat_id,),
+            )
+            for row in cursor:
+                yield row["sender_id"], row["text"] or ""
 
     def get_session_shape(self, chat_id: int) -> dict[str, float | None]:
         with self._db.connect() as conn:
@@ -554,18 +725,27 @@ class SQLiteMessageRepository(IMessageRepository):
             ).fetchone()
         return dict(row) if row else {}
 
-    def get_response_latencies(self, chat_id: int) -> dict[str, list[float]]:
+    def get_response_latencies(
+        self, chat_id: int, within_seconds: int | None = None
+    ) -> dict[str, list[float]]:
         # julianday() works in fractional days, so the seconds it yields carry
         # float noise well below the resolution a reply latency means anything
         # at; round it off rather than leaking 59.99999 into every statistic.
+        #
+        # ``within_seconds`` narrows both windows to one value, which is how the
+        # active-session figures are taken: the usual windows run to hours, so
+        # they count someone answering after a night's sleep as a slow reply,
+        # and the median they produce is a statement about sleep rather than
+        # about attention.
+        window = within_seconds if within_seconds is not None else None
         latencies: dict[str, list[float]] = {}
         with self._db.connect() as conn:
             rows = conn.execute(
                 _LATENCIES,
                 {
                     "chat_id": chat_id,
-                    "reply_window": self._reply_window,
-                    "turn_window": self._turn_window,
+                    "reply_window": window if window is not None else self._reply_window,
+                    "turn_window": window if window is not None else self._turn_window,
                 },
             )
             for row in rows:
@@ -573,6 +753,14 @@ class SQLiteMessageRepository(IMessageRepository):
                     round(float(row["latency"]), _LATENCY_PRECISION)
                 )
         return latencies
+
+
+def _column(row: Any, name: str, default: int = 0) -> int:
+    """Reads an integer column that a database created earlier may not carry."""
+    try:
+        return int(row[name] or default)
+    except (IndexError, KeyError, TypeError, ValueError):
+        return default
 
 
 def _parse_timestamp(value: Any) -> datetime:

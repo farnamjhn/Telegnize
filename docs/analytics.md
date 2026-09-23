@@ -130,6 +130,158 @@ than across chats.
 text-psychology research. Read it as a description of how someone frames
 things, not as a score.
 
+## Circadian
+
+When someone writes, and how fast they answer while the conversation is
+actually happening.
+
+| Field | Meaning |
+| --- | --- |
+| `hourly_distribution` | Their messages by hour of day, 0–23 |
+| `night_owl_percent` | Share sent between midnight and 05:00 |
+| `peak_hour` | The hour they write most in |
+| `active_median_seconds`, `active_p90_seconds` | Reply time with the overnight gaps taken out |
+| `active_reply_count` | Replies the active figures are computed from |
+| `revived_count`, `revived_percent` | Long silences this person was the one to end |
+
+`night_owl_percent` is the per-participant version of `late_night_percent`. The
+chat-wide figure averages two people together, which describes neither of them
+when they keep different hours — two participants on opposite schedules produce
+a flat distribution that looks like nobody has a schedule at all.
+
+### Why there are two reply times
+
+`median_seconds` under Responsiveness counts every reply inside the turn
+window, which runs to six hours. A conversation that stops at 1am and resumes
+at 9am contributes an eight-hour reply to that median — so for anyone who
+sleeps, the unfiltered figure is partly a statement about sleep.
+
+`active_median_seconds` narrows the window to two hours, which is short enough
+that it is describing attention rather than availability. Read the active
+figures to compare how quickly two people answer each other, and the
+unfiltered ones to see how long someone is left waiting overall. They answer
+different questions and often disagree.
+
+**Reviving** counts silences longer than 48 hours — the conversation having
+stopped rather than paused — and credits whoever wrote next. A persistent
+imbalance says who carries the conversation back from nothing. It is a small
+sample in most chats: check `silence_count` before reading anything into the
+percentage.
+
+## Control
+
+Who sets the pace, and who is left holding the last message.
+
+| Field | Meaning |
+| --- | --- |
+| `burst_count` | Uninterrupted runs of their own messages |
+| `long_burst_count`, `long_burst_percent` | Bursts of three messages or more |
+| `longest_burst`, `avg_burst_size` | The shape of those runs |
+| `last_word_count`, `last_word_percent` | Conversations where their message was the last one |
+| `collision_count`, `collision_percent` | Messages sent within 30 seconds of the other person's |
+
+A **burst of three** is where writing again stops reading as an afterthought.
+Some people think in messages and send four where another sends one paragraph;
+that is a pacing difference, and it is what this measures. It is not anxiety,
+and reading it as anxiety is exactly the mistake this document exists to
+prevent.
+
+**Last word** uses a three-hour silence, tighter than the six-hour session gap
+that `closed_count` under Engagement uses, because being left unanswered for
+three hours is the behaviour worth counting. The two figures will not agree,
+and both are reported.
+
+**Collisions** are the two of you typing at once — messages that crossed rather
+than answered. They read as co-presence and often as excitement. Consecutive
+messages from one person are excluded: that is a burst, and it means something
+else.
+
+## Composition
+
+What the messages are made of.
+
+| Field | Meaning |
+| --- | --- |
+| `unique_word_count` | Distinct words they used |
+| `type_token_ratio` | Unique words over total words |
+| `lexical_diversity` | Moving-average type-token ratio — the comparable one |
+| `text_message_count`, `media_message_count`, `media_percent` | Text against everything else |
+| `link_count` | Links shared, counted per occurrence |
+| `voice_message_count`, `voice_seconds`, `avg_voice_seconds` | Voice notes and how long they run |
+| `timed_voice_count` | Voice notes whose length the export carried |
+
+**Use `lexical_diversity`, not `type_token_ratio`.** Raw TTR falls as a sample
+grows — a thousand words cannot help repeating more than ten do — so comparing
+two people by raw TTR mostly measures which of them wrote more. Lexical
+diversity is a moving-average TTR over a fixed 500-token window, which removes
+that dependence. Both are reported because the raw ratio is what the term
+usually means, and seeing them disagree is the point.
+
+Neither is comparable across languages. Persian is agglutinative and Telegnize
+tokenizes on word boundaries, so Persian text produces more distinct tokens
+than English saying the same thing. Compare two people writing the same mix,
+in the same chat, and nothing else.
+
+`avg_voice_seconds` is averaged over `timed_voice_count`, not over every voice
+note. A chat imported before durations were read has voice notes and no
+seconds; averaging over all of them would report that as very short messages
+rather than as missing data, so it reads `null` instead. `POST
+/api/chats/{id}/rederive` cannot recover durations — they are in the export,
+not in the text — so that one needs a fresh import.
+
+## Stance
+
+Asking, hedging, and going along with what the other person said. Named for
+Hyland's stance-and-engagement framework, which these borrow the idea of and
+none of the coding procedure from.
+
+| Field | Meaning |
+| --- | --- |
+| `interrogative_count`, `questions_per_100_messages` | Questions, by punctuation or by wording |
+| `hedge_count`, `hedge_per_1k_words` | "maybe", "probably", `شاید`, `فکر کنم` |
+| `backchannel_count`, `backchannel_percent` | Whole messages that are a bare "yeah" / `دقیقا` |
+
+A message counts as a question if it carries `?` or `؟` **or** contains a
+question word. Persian questions are routinely written without any punctuation
+at all, so counting marks alone undercounts them badly — which is why
+`interrogative_count` and `question_count` differ, and why this one is the
+better reading of curiosity in a Persian chat.
+
+Hedging is token-matched, so `فکر` counts wherever it appears, including where
+it is not hedging. That is the cost of matching tokens rather than parsing, and
+the reason this is a rate to compare between two people rather than a count
+that means anything on its own.
+
+Backchannels overlap with cold closures on purpose. The same "ok" can be read
+as closing a turn cheaply or as keeping the floor with the other person; both
+readings are reported and neither excludes the other.
+
+## Style matching
+
+`style_matching` is chat-level rather than per participant, because it
+describes a pair.
+
+| Field | Meaning |
+| --- | --- |
+| `lsm_percent` | Linguistic Style Matching across adjacent turns |
+| `by_category` | The nine function-word categories it averages |
+| `turn_pairs` | Adjacent turn pairs it was computed over |
+
+Function words — articles, prepositions, pronouns, auxiliaries — are the
+grammatical scaffolding nobody chooses deliberately, and Ireland &
+Pennebaker's work found they converge between people who are engaged with each
+other. For each pair of adjacent turns by different speakers, each category
+scores `1 - |a - b| / (a + b)` on the two speakers' rates, and the whole thing
+is the mean.
+
+What it does **not** support: a number for how well two people get along. LSM
+rises with engagement of any kind, including an argument, and the published
+work is on English in controlled settings. The Persian members of these
+categories are the free-standing forms the normalizer leaves behind, so Persian
+is undercounted relative to English and the figure drifts with the language
+mix. Compare it against itself over time in one chat, and treat a
+between-chats comparison as meaningless.
+
 ## Rhythm
 
 A **session** is a run of messages with no silence in it longer than the
@@ -141,6 +293,7 @@ session gap — roughly, one sitting.
 | `active_days`, `span_days`, `active_day_percent` | How much of the period had any contact |
 | `longest_silence_days` | The longest the conversation went quiet |
 | `late_night_percent` | Share sent between midnight and 05:00 |
+| `silence_count` | Silences longer than 48 hours |
 
 ## Balance
 

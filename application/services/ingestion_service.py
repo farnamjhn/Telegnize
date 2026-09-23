@@ -2,14 +2,18 @@
 
 import logging
 
-from application.dtos.chat_dto import ChatDTO, ImportSummaryDTO
+from application.dtos.chat_dto import (
+    ChatDTO,
+    ImportSummaryDTO,
+    RederiveSummaryDTO,
+)
 from application.ports.export_reader import (
     DEFAULT_BATCH_SIZE,
     ExportFormatError,
     FileSource,
     IExportReader,
 )
-from domain.errors import InvalidExportError
+from domain.errors import ChatNotFoundError, InvalidExportError
 from domain.models.chat import Chat
 from domain.repository.chat_repository import IChatRepository
 from domain.repository.message_repository import IMessageRepository
@@ -81,3 +85,39 @@ class IngestionService:
 
         logger.info("Imported %d messages into chat %s.", total, chat.id)
         return ImportSummaryDTO(chat=ChatDTO.from_domain(chat), total_messages=total)
+
+    def rederive(self, chat_id: int, batch_size: int | None = None) -> RederiveSummaryDTO:
+        """Recomputes every derived column from the text already stored.
+
+        Word counts, markers and the whole-message readings are written at
+        ingest, so a chat imported before a marker existed carries a zero for
+        it — not because the wording was absent but because nothing looked.
+        Every one of them is a pure function of text this database already
+        holds, so they can be derived again in place; re-importing the export
+        is not needed and neither is the export.
+
+        The one thing this cannot recover is a voice note's length, which is
+        in the export rather than in the text, and so needs a fresh import.
+
+        Raises:
+            ChatNotFoundError: if the chat has not been imported.
+        """
+        if self._chats.get_by_id(chat_id) is None:
+            raise ChatNotFoundError(chat_id)
+
+        size = batch_size or self._batch_size
+        rewritten = 0
+        batch: list = []
+        # save_batch upserts on (chat_id, telegram_msg_id) and recomputes every
+        # derived column from the entity, so a round trip through it is the
+        # whole re-derivation. Batched so a large chat stays bounded in memory.
+        for message in self._messages.iter_chat_timeline(chat_id):
+            batch.append(message)
+            if len(batch) >= size:
+                rewritten += self._messages.save_batch(batch)
+                batch = []
+        if batch:
+            rewritten += self._messages.save_batch(batch)
+
+        logger.info("Re-derived %d messages in chat %s.", rewritten, chat_id)
+        return RederiveSummaryDTO(chat_id=chat_id, messages_rewritten=rewritten)

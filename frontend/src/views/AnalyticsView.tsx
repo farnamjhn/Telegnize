@@ -27,6 +27,7 @@ import {
   days,
   duration,
   hourLabel,
+  humanize,
   int,
   languageName,
   minutes,
@@ -37,7 +38,7 @@ import {
   ratio,
   signedPct,
 } from "../lib/format";
-import type { Chat, ParticipantStats } from "../lib/types";
+import type { Chat, ParticipantStats, StyleMatching } from "../lib/types";
 import { useAsync } from "../lib/useAsync";
 
 const WEEKDAYS = [
@@ -52,13 +53,25 @@ const WEEKDAYS = [
 
 /* ------------------------------------------------ the participant tables */
 
-type MetricGroup = "volume" | "responsiveness" | "engagement" | "expression";
+type MetricGroup =
+  | "volume"
+  | "responsiveness"
+  | "circadian"
+  | "engagement"
+  | "control"
+  | "composition"
+  | "expression"
+  | "stance";
 
 const GROUPS = [
   { value: "volume", label: "Volume" },
   { value: "responsiveness", label: "Responsiveness" },
+  { value: "circadian", label: "Circadian" },
   { value: "engagement", label: "Engagement" },
+  { value: "control", label: "Control" },
+  { value: "composition", label: "Composition" },
   { value: "expression", label: "Expression" },
+  { value: "stance", label: "Stance" },
 ] as const;
 
 /** What the reader should keep in mind for each group — condensed from
@@ -72,7 +85,19 @@ const GROUP_NOTE: Record<MetricGroup, string> = {
     "Double-texting is a style measure at least as much as a pursuit measure — it says most when two people differ sharply on it.",
   expression:
     "Rates per thousand words, so writing more does not by itself raise the figure. Marker counts describe wording, not feeling.",
+  circadian:
+    "The active reply time leaves out gaps longer than two hours, so it describes attention rather than availability. It will disagree with the median under Responsiveness, and both are right about different questions.",
+  control:
+    "A burst of three is a pacing difference — some people think in messages where others think in paragraphs. It is not anxiety, and reading it as anxiety is the mistake this whole document exists to prevent.",
+  composition:
+    "Use Diversity, not raw TTR: the raw ratio falls as a sample grows, so it mostly measures who wrote more. Neither is comparable across languages.",
+  stance:
+    "Questions count Persian wording as well as punctuation, so this is higher than the Responsiveness question count and is the better reading of curiosity here.",
 };
+
+/** A 0–1 ratio, at the precision it is actually resolved to. */
+const decimal = (value: number | null | undefined, digits = 3): string =>
+  value == null ? "—" : value.toFixed(digits);
 
 interface Column {
   key: string;
@@ -184,6 +209,160 @@ const COLUMNS: Record<MetricGroup, Column[]> = {
     { key: "voice", label: "Voice", render: (p) => compact(p.engagement.voice_message_count) },
     { key: "media", label: "Media", render: (p) => compact(p.engagement.media_count) },
   ],
+  circadian: [
+    {
+      key: "night",
+      label: "Night owl",
+      render: (p) => pct(p.circadian.night_owl_percent),
+      hint: "Share of their messages sent between midnight and 05:00",
+    },
+    {
+      key: "peak",
+      label: "Peak hour",
+      render: (p) => (p.circadian.peak_hour == null ? "—" : `${hourLabel(p.circadian.peak_hour)}:00`),
+      hint: "The hour they write most in",
+    },
+    {
+      key: "activeMedian",
+      label: "Active reply",
+      render: (p) => duration(p.circadian.active_median_seconds),
+      hint: "Median reply time with the overnight gaps taken out — attention rather than availability",
+    },
+    {
+      key: "activeP90",
+      label: "Active p90",
+      render: (p) => duration(p.circadian.active_p90_seconds),
+      hint: "The slow tail, still inside a live conversation",
+    },
+    {
+      key: "activeCount",
+      label: "Live replies",
+      render: (p) => compact(p.circadian.active_reply_count),
+      hint: "Replies the active figures are computed from",
+    },
+    {
+      key: "revived",
+      label: "Revived",
+      render: (p) =>
+        `${int(p.circadian.revived_count)} · ${pctOrDash(p.circadian.revived_percent, 0)}`,
+      hint: "Silences over 48 hours that this person was the one to end. Usually a small sample — check the silence count under Rhythm",
+    },
+  ],
+  control: [
+    {
+      key: "turns",
+      label: "Turns",
+      render: (p) => compact(p.control.burst_count),
+      hint: "Uninterrupted runs of their own messages",
+    },
+    {
+      key: "bursts",
+      label: "Bursts 3+",
+      render: (p) =>
+        `${compact(p.control.long_burst_count)} · ${pct(p.control.long_burst_percent, 0)}`,
+      hint: "Turns of three messages or more before the other person said anything",
+    },
+    {
+      key: "longest",
+      label: "Longest",
+      render: (p) => int(p.control.longest_burst),
+      hint: "The most messages they ever sent in a row",
+    },
+    {
+      key: "avgBurst",
+      label: "Msgs / burst",
+      render: (p) => p.control.avg_burst_size.toFixed(1),
+    },
+    {
+      key: "lastWord",
+      label: "Last word",
+      render: (p) =>
+        `${int(p.control.last_word_count)} · ${pctOrDash(p.control.last_word_percent, 0)}`,
+      hint: "Conversations whose final message was theirs, at a three-hour silence",
+    },
+    {
+      key: "collisions",
+      label: "Collisions",
+      render: (p) => `${compact(p.control.collision_count)} · ${pct(p.control.collision_percent, 0)}`,
+      hint: "Messages sent within 30 seconds of the other person's — the two of you typing at once",
+    },
+  ],
+  composition: [
+    {
+      key: "vocabulary",
+      label: "Vocabulary",
+      render: (p) => compact(p.composition.unique_word_count),
+      hint: "Distinct words they used",
+    },
+    {
+      key: "diversity",
+      label: "Diversity",
+      render: (p) => decimal(p.composition.lexical_diversity),
+      hint: "Moving-average type-token ratio over a 500-word window. Read this one — it does not fall as someone writes more",
+    },
+    {
+      key: "ttr",
+      label: "Raw TTR",
+      render: (p) => decimal(p.composition.type_token_ratio),
+      hint: "Unique over total words. Falls as a sample grows, so between two people it mostly measures who wrote more",
+    },
+    {
+      key: "media",
+      label: "Media",
+      render: (p) => `${compact(p.composition.media_message_count)} · ${pct(p.composition.media_percent, 0)}`,
+      hint: "Photos, stickers, files and voice notes as a share of everything they sent",
+    },
+    {
+      key: "links",
+      label: "Links",
+      render: (p) => compact(p.composition.link_count),
+    },
+    {
+      key: "voice",
+      label: "Voice",
+      render: (p) => compact(p.composition.voice_message_count),
+    },
+    {
+      key: "voiceTime",
+      label: "Voice time",
+      render: (p) =>
+        p.composition.timed_voice_count === 0 ? "—" : duration(p.composition.voice_seconds),
+      hint: "Total across voice notes whose length the export carried",
+    },
+    {
+      key: "avgVoice",
+      label: "Avg voice",
+      render: (p) => duration(p.composition.avg_voice_seconds),
+      hint: "Averaged over timed notes only, so it reads — rather than 0 when durations were never imported",
+    },
+  ],
+  stance: [
+    {
+      key: "questions",
+      label: "Questions",
+      render: (p) => compact(p.stance.interrogative_count),
+      hint: "By punctuation or by wording — Persian questions often carry no ؟ at all",
+    },
+    {
+      key: "questionRate",
+      label: "Q / 100 msgs",
+      render: (p) => rate(p.stance.questions_per_100_messages),
+      hint: "Relational inquisitiveness: asking about the other person rather than broadcasting",
+    },
+    {
+      key: "hedging",
+      label: "Hedging / 1k",
+      render: (p) => rate(p.stance.hedge_per_1k_words),
+      hint: '"maybe", "probably", شاید, فکر کنم — token-matched, so read it against the other participant, not on its own',
+    },
+    {
+      key: "backchannel",
+      label: "Backchannel",
+      render: (p) =>
+        `${compact(p.stance.backchannel_count)} · ${pct(p.stance.backchannel_percent, 0)}`,
+      hint: 'Whole messages that are a bare "yeah" / دقیقا — active listening, or a reply that is not one',
+    },
+  ],
   expression: [
     {
       key: "affection",
@@ -236,26 +415,70 @@ const COLUMNS: Record<MetricGroup, Column[]> = {
   ],
 };
 
-/** Expression markers are written to columns as messages are stored, so a chat
- *  imported before that feature landed reads as all-zero rather than empty. */
-function hasMarkers(participants: ParticipantStats[]): boolean {
-  return participants.some((p) =>
-    [
-      p.expression.emoji_count,
-      p.expression.affection_count,
-      p.expression.apology_count,
-      p.expression.gratitude_count,
-      p.expression.exclamation_count,
-      p.expression.self_reference_count,
-      p.expression.collective_reference_count,
-    ].some((count) => count > 0),
-  );
+/** Marker columns are written as messages are stored, so a chat imported
+ *  before a metric existed reads as all-zero rather than empty.
+ *
+ *  Only groups whose markers cannot all be legitimately zero belong here. A
+ *  chat really can contain no links, so Composition is left out and its one
+ *  genuinely unrecoverable gap — voice durations — is reported on its own. */
+const MARKER_TOTALS: Partial<Record<MetricGroup, (p: ParticipantStats) => number[]>> = {
+  expression: (p) => [
+    p.expression.emoji_count,
+    p.expression.affection_count,
+    p.expression.apology_count,
+    p.expression.gratitude_count,
+    p.expression.exclamation_count,
+    p.expression.self_reference_count,
+    p.expression.collective_reference_count,
+  ],
+  stance: (p) => [
+    p.stance.interrogative_count,
+    p.stance.hedge_count,
+    p.stance.backchannel_count,
+  ],
+};
+
+function markersMissing(group: MetricGroup, participants: ParticipantStats[]): boolean {
+  const totals = MARKER_TOTALS[group];
+  if (!totals || participants.length === 0) return false;
+  return !participants.some((person) => totals(person).some((count) => count > 0));
 }
 
-function Participants({ participants }: { participants: ParticipantStats[] }) {
+/** Voice notes with no length on any of them. Unlike the marker columns this
+ *  cannot be recomputed: a duration lives in the export, not in the text. */
+function voiceDurationsMissing(participants: ParticipantStats[]): boolean {
+  const voice = participants.reduce((n, p) => n + p.composition.voice_message_count, 0);
+  const timed = participants.reduce((n, p) => n + p.composition.timed_voice_count, 0);
+  return voice > 0 && timed === 0;
+}
+
+function Participants({
+  participants,
+  chatId,
+  onRederived,
+}: {
+  participants: ParticipantStats[];
+  chatId: number;
+  onRederived: () => void;
+}) {
   const [group, setGroup] = useState<MetricGroup>("volume");
+  const [rederiving, setRederiving] = useState(false);
+  const [rederiveError, setRederiveError] = useState<string | null>(null);
   const columns = COLUMNS[group];
-  const markersMissing = group === "expression" && !hasMarkers(participants);
+  const missing = markersMissing(group, participants);
+
+  async function rederive() {
+    setRederiving(true);
+    setRederiveError(null);
+    try {
+      await api.rederive(chatId);
+      onRederived();
+    } catch (cause) {
+      setRederiveError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setRederiving(false);
+    }
+  }
 
   return (
     <Card
@@ -264,12 +487,33 @@ function Participants({ participants }: { participants: ParticipantStats[] }) {
       action={<Toggle label="Metric group" value={group} onChange={setGroup} options={GROUPS} />}
       flush
     >
-      {markersMissing && (
+      {missing && (
         <div style={{ padding: "0 var(--pad-card) 4px" }}>
           <Notice tone="error">
-            Every marker reads zero. These counts are written as messages are stored, so a
-            chat imported before the expression metrics existed has none — re-import the
-            export to fill them in.
+            Every marker in this group reads zero. These counts are written as messages are
+            stored, so a chat imported before the metric existed has none. They are all
+            derived from text already in the database, so recomputing fills them in — the
+            export is not needed.
+            <div style={{ marginTop: 10 }}>
+              <button className="btn" disabled={rederiving} onClick={() => void rederive()}>
+                {rederiving && <span className="spinner" />}
+                Recompute from stored text
+              </button>
+            </div>
+          </Notice>
+        </div>
+      )}
+      {rederiveError && (
+        <div style={{ padding: "0 var(--pad-card) 4px" }}>
+          <Notice tone="error">{rederiveError}</Notice>
+        </div>
+      )}
+      {group === "composition" && voiceDurationsMissing(participants) && (
+        <div style={{ padding: "0 var(--pad-card) 4px" }}>
+          <Notice>
+            Voice notes are here but none carry a length, so the time columns read —. A
+            duration lives in the export rather than in the message text, which is the one
+            thing recomputing cannot recover: re-import the export to fill it in.
           </Notice>
         </div>
       )}
@@ -352,6 +596,89 @@ function LatencyTrend({ participants }: { participants: ParticipantStats[] }) {
   );
 }
 
+/* ----------------------------------------------------------- body clock */
+
+/** Each participant's own hour-of-day distribution.
+ *
+ *  The chat-wide chart above averages everyone together, which describes
+ *  nobody when two people keep different hours: opposite schedules produce a
+ *  flat curve that looks like neither of them has one. */
+function BodyClock({ participants }: { participants: ParticipantStats[] }) {
+  // The circadian check is for the moment after a deploy when the page has
+  // reloaded and the API has not: one missing group should not blank the view.
+  if (participants.length < 2 || !participants[0].circadian) return null;
+
+  return (
+    <Card
+      title="Body clock"
+      subtitle="Each participant's own hours. Compare the shapes — the chat-wide chart above averages them together."
+    >
+      <div style={{ display: "grid", gap: 22 }}>
+        {participants.slice(0, 3).map((person) => {
+          const hours: Point[] = Array.from({ length: 24 }, (_, hour) => ({
+            key: String(hour),
+            label: hourLabel(hour),
+            value: person.circadian.hourly_distribution?.[String(hour)] ?? 0,
+          }));
+          return (
+            <div key={person.sender_id}>
+              <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 500 }}>{person.sender_name}</span>
+                <span className="faint" style={{ fontSize: 12 }}>
+                  {pct(person.circadian.night_owl_percent)} after midnight
+                  {person.circadian.peak_hour != null &&
+                    ` · peaks at ${hourLabel(person.circadian.peak_hour)}:00`}
+                </span>
+              </div>
+              <ColumnChart data={hours} height={120} labelEvery={3} />
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+/* --------------------------------------------------------- style matching */
+
+function StyleMatchingCard({ matching }: { matching: StyleMatching }) {
+  if (matching.lsm_percent == null) return null;
+
+  const categories = Object.entries(matching.by_category).sort((a, b) => b[1] - a[1]);
+
+  return (
+    <Card
+      title="Style matching"
+      subtitle="How far the two of you converge on function words — the grammatical scaffolding nobody picks deliberately."
+    >
+      <div className="grid grid--hero" style={{ marginBottom: 18 }}>
+        <Card fill>
+          <Hero
+            label="Linguistic style matching"
+            value={pct(matching.lsm_percent)}
+            note={`across ${compact(matching.turn_pairs)} adjacent turn pairs`}
+          />
+        </Card>
+        <Card fill>
+          <p className="muted" style={{ fontSize: 13 }}>
+            Function-word convergence rises with engagement of any kind, an argument
+            included, so this is not a score for how well two people get along. The Persian
+            entries are the free-standing forms the normalizer leaves behind, so the figure
+            drifts with the language mix. Read it against itself over time in this chat, and
+            treat a comparison with another chat as meaningless.
+          </p>
+        </Card>
+      </div>
+
+      <div style={{ display: "grid", gap: 12 }}>
+        {categories.map(([name, value]) => (
+          <BalanceMeter key={name} label={humanize(name)} value={value} />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 /* -------------------------------------------------------------- balance */
 
 function BalanceMeter({ label, value, hint }: { label: string; value: number; hint?: string }) {
@@ -427,7 +754,7 @@ export function AnalyticsView({
   chatId: number | null;
   onChatId: (id: number) => void;
 }) {
-  const { data, error, loading, refetching } = useAsync(
+  const { data, error, loading, refetching, reload } = useAsync(
     () => (chatId == null ? null : api.analytics(chatId)),
     [chatId],
   );
@@ -560,6 +887,11 @@ export function AnalyticsView({
                       value={pct(rhythm.late_night_percent)}
                       note="midnight to 05:00"
                     />
+                    <Stat
+                      label="Silences"
+                      value={int(rhythm.silence_count)}
+                      note="over 48 hours"
+                    />
                   </div>
                 </Card>
               )}
@@ -588,7 +920,11 @@ export function AnalyticsView({
                 </Card>
               </div>
 
+              <BodyClock participants={participants} />
+
               <LatencyTrend participants={participants} />
+
+              {data.style_matching && <StyleMatchingCard matching={data.style_matching} />}
 
               {balance && (
                 <Card
@@ -620,7 +956,11 @@ export function AnalyticsView({
                 </Card>
               )}
 
-              <Participants participants={participants} />
+              <Participants
+                participants={participants}
+                chatId={data.chat_id}
+                onRederived={reload}
+              />
             </>
           )}
         </div>
