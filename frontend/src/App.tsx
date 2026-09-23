@@ -5,6 +5,7 @@ import { api } from "./lib/api";
 import { useAsync } from "./lib/useAsync";
 import type { Chat } from "./lib/types";
 import { AnalyticsView } from "./views/AnalyticsView";
+import { AssessmentView } from "./views/AssessmentView";
 import { ChatsView } from "./views/ChatsView";
 import { DecisionsView } from "./views/DecisionsView";
 import { MessagesView } from "./views/MessagesView";
@@ -73,6 +74,9 @@ export default function App() {
       )}
       {view === "analytics" && (
         <AnalyticsView chats={list} chatId={chatId} onChatId={setChatId} />
+      )}
+      {view === "assessment" && (
+        <AssessmentView chats={list} chatId={chatId} onChatId={setChatId} />
       )}
       {view === "messages" && (
         <MessagesView

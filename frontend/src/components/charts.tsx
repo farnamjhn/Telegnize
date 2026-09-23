@@ -14,6 +14,8 @@ import { useState } from "react";
 import { int } from "../lib/format";
 import { useMeasure } from "../lib/useMeasure";
 
+const SURFACE = "var(--surface-1)";
+
 export interface Point {
   key: string;
   label: string;
@@ -25,7 +27,9 @@ function niceTicks(max: number, count = 4): number[] {
   if (max <= 0) return [0];
   const raw = max / count;
   const magnitude = 10 ** Math.floor(Math.log10(raw));
-  const step = [1, 2, 2.5, 5, 10].map((m) => m * magnitude).find((s) => s >= raw) ?? magnitude * 10;
+  const step =
+    [1, 2, 2.5, 5, 10].map((m) => m * magnitude).find((s) => s >= raw) ??
+    magnitude * 10;
   const ticks: number[] = [];
   for (let value = 0; ; value += step) {
     ticks.push(value);
@@ -34,7 +38,13 @@ function niceTicks(max: number, count = 4): number[] {
 }
 
 /** A bar whose data-end is rounded and whose baseline end stays square. */
-function capPath(x: number, y: number, width: number, height: number, radius = 4): string {
+function capPath(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius = 4,
+): string {
   const r = Math.min(radius, width / 2, height);
   return [
     `M${x} ${y + height}`,
@@ -47,7 +57,19 @@ function capPath(x: number, y: number, width: number, height: number, radius = 4
   ].join(" ");
 }
 
-function Tooltip({ x, y, title, value, unit }: { x: number; y: number; title: string; value: string; unit?: string }) {
+function Tooltip({
+  x,
+  y,
+  title,
+  value,
+  unit,
+}: {
+  x: number;
+  y: number;
+  title: string;
+  value: string;
+  unit?: string;
+}) {
   return (
     <div className="tooltip" style={{ left: x, top: y }}>
       <div className="tooltip-title">{title}</div>
@@ -84,20 +106,39 @@ export function ColumnChart({
   const scaleMax = ticks[ticks.length - 1] || 1;
   const band = data.length ? plotWidth / data.length : 0;
   const barWidth = Math.max(2, Math.min(24, band * 0.62));
-  const peak = data.reduce((best, d, i) => (d.value > data[best].value ? i : best), 0);
+  const peak = data.reduce(
+    (best, d, i) => (d.value > data[best].value ? i : best),
+    0,
+  );
 
-  const yOf = (value: number) => pad.top + plotHeight - (value / scaleMax) * plotHeight;
+  const yOf = (value: number) =>
+    pad.top + plotHeight - (value / scaleMax) * plotHeight;
 
   return (
     <div className="chart-figure" ref={ref}>
       {width > 0 && (
-        <svg className="chart" width={width} height={height} role="img"
-          aria-label={`${unit ?? "Messages"} by ${data.length} buckets`}>
+        <svg
+          className="chart"
+          width={width}
+          height={height}
+          role="img"
+          aria-label={`${unit ?? "Messages"} by ${data.length} buckets`}
+        >
           {ticks.map((tick) => (
             <g key={tick}>
-              <line className="chart-grid" x1={pad.left} x2={width - pad.right}
-                y1={yOf(tick) + 0.5} y2={yOf(tick) + 0.5} />
-              <text className="chart-tick" x={pad.left - 8} y={yOf(tick) + 3.5} textAnchor="end">
+              <line
+                className="chart-grid"
+                x1={pad.left}
+                x2={width - pad.right}
+                y1={yOf(tick) + 0.5}
+                y2={yOf(tick) + 0.5}
+              />
+              <text
+                className="chart-tick"
+                x={pad.left - 8}
+                y={yOf(tick) + 3.5}
+                textAnchor="end"
+              >
                 {int(tick)}
               </text>
             </g>
@@ -110,7 +151,12 @@ export function ColumnChart({
             return (
               <path
                 key={point.key}
-                d={capPath(x, pad.top + plotHeight - barHeight, barWidth, Math.max(barHeight, point.value > 0 ? 2 : 0))}
+                d={capPath(
+                  x,
+                  pad.top + plotHeight - barHeight,
+                  barWidth,
+                  Math.max(barHeight, point.value > 0 ? 2 : 0),
+                )}
                 fill="var(--series-1)"
                 opacity={active === null || isActive ? 1 : 0.42}
                 style={{ transition: "opacity 120ms" }}
@@ -120,19 +166,33 @@ export function ColumnChart({
 
           {/* Selective direct label: the peak only. */}
           {data.length > 0 && data[peak].value > 0 && active === null && (
-            <text className="chart-label" x={pad.left + peak * band + band / 2}
-              y={yOf(data[peak].value) - 7} textAnchor="middle">
+            <text
+              className="chart-label"
+              x={pad.left + peak * band + band / 2}
+              y={yOf(data[peak].value) - 7}
+              textAnchor="middle"
+            >
               {int(data[peak].value)}
             </text>
           )}
 
-          <line className="chart-axis" x1={pad.left} x2={width - pad.right}
-            y1={pad.top + plotHeight + 0.5} y2={pad.top + plotHeight + 0.5} />
+          <line
+            className="chart-axis"
+            x1={pad.left}
+            x2={width - pad.right}
+            y1={pad.top + plotHeight + 0.5}
+            y2={pad.top + plotHeight + 0.5}
+          />
 
           {data.map((point, i) =>
             i % labelEvery === 0 ? (
-              <text key={point.key} className="chart-tick" x={pad.left + i * band + band / 2}
-                y={height - 6} textAnchor="middle">
+              <text
+                key={point.key}
+                className="chart-tick"
+                x={pad.left + i * band + band / 2}
+                y={height - 6}
+                textAnchor="middle"
+              >
                 {point.label}
               </text>
             ) : null,
@@ -140,17 +200,252 @@ export function ColumnChart({
 
           {/* Hit areas span the whole band, so they are far bigger than the mark. */}
           {data.map((point, i) => (
-            <rect key={point.key} className="chart-hit" x={pad.left + i * band} y={pad.top}
-              width={band} height={plotHeight} onMouseEnter={() => setActive(i)}
-              onMouseLeave={() => setActive(null)} />
+            <rect
+              key={point.key}
+              className="chart-hit"
+              x={pad.left + i * band}
+              y={pad.top}
+              width={band}
+              height={plotHeight}
+              onMouseEnter={() => setActive(i)}
+              onMouseLeave={() => setActive(null)}
+            />
           ))}
         </svg>
       )}
 
       {active !== null && data[active] && (
-        <Tooltip x={pad.left + active * band + band / 2} y={yOf(data[active].value)}
-          title={data[active].label} value={int(data[active].value)} unit={unit} />
+        <Tooltip
+          x={pad.left + active * band + band / 2}
+          y={yOf(data[active].value)}
+          title={data[active].label}
+          value={int(data[active].value)}
+          unit={unit}
+        />
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ trend chart */
+
+export interface TrendSeries {
+  key: string;
+  label: string;
+  color: string;
+  points: { period: string; value: number; count: number }[];
+}
+
+/** A multi-series line chart over shared periods. Used for latency trends,
+ *  where the shape of the series is the point and the single drift figure
+ *  only says which direction to look in. */
+export function TrendChart({
+  series,
+  height = 210,
+  formatValue,
+  formatPeriod,
+}: {
+  series: TrendSeries[];
+  height?: number;
+  formatValue: (value: number) => string;
+  formatPeriod: (period: string) => string;
+}) {
+  const { ref, width } = useMeasure<HTMLDivElement>();
+  const [active, setActive] = useState<number | null>(null);
+
+  // One axis built from every period any series covers, oldest first.
+  const periods = [
+    ...new Set(series.flatMap((s) => s.points.map((p) => p.period))),
+  ].sort();
+  const pad = { top: 18, right: 16, bottom: 22, left: 46 };
+  const plotWidth = Math.max(0, width - pad.left - pad.right);
+  const plotHeight = height - pad.top - pad.bottom;
+  const max = Math.max(
+    1,
+    ...series.flatMap((s) => s.points.map((p) => p.value)),
+  );
+  const ticks = niceTicks(max);
+  const scaleMax = ticks[ticks.length - 1] || 1;
+  const last = periods.length - 1;
+
+  const xOf = (i: number) =>
+    pad.left + (periods.length < 2 ? plotWidth / 2 : (i / last) * plotWidth);
+  const yOf = (value: number) =>
+    pad.top + plotHeight - (value / scaleMax) * plotHeight;
+
+  const byPeriod = (s: TrendSeries) =>
+    new Map(s.points.map((p) => [p.period, p]));
+  const stride = Math.max(1, Math.ceil(periods.length / 6));
+
+  return (
+    <div className="chart-figure" ref={ref}>
+      {width > 0 && periods.length > 0 && (
+        <svg
+          className="chart"
+          width={width}
+          height={height}
+          role="img"
+          aria-label={`Trend over ${periods.length} periods`}
+        >
+          {ticks.map((tick) => (
+            <g key={tick}>
+              <line
+                className="chart-grid"
+                x1={pad.left}
+                x2={width - pad.right}
+                y1={yOf(tick) + 0.5}
+                y2={yOf(tick) + 0.5}
+              />
+              <text
+                className="chart-tick"
+                x={pad.left - 8}
+                y={yOf(tick) + 3.5}
+                textAnchor="end"
+              >
+                {formatValue(tick)}
+              </text>
+            </g>
+          ))}
+
+          {series.map((line) => {
+            const lookup = byPeriod(line);
+            const path = periods
+              .map((period, i) => {
+                const point = lookup.get(period);
+                return point
+                  ? `${i === 0 ? "M" : "L"}${xOf(i)} ${yOf(point.value)}`
+                  : "";
+              })
+              .filter(Boolean)
+              .join(" ")
+              .replace(/^L/, "M");
+            const endIndex = periods.findLastIndex((period) =>
+              lookup.has(period),
+            );
+            const endPoint =
+              endIndex >= 0 ? lookup.get(periods[endIndex]) : undefined;
+            return (
+              <g key={line.key}>
+                <path
+                  d={path}
+                  fill="none"
+                  stroke={line.color}
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                {endPoint && (
+                  <circle
+                    cx={xOf(endIndex)}
+                    cy={yOf(endPoint.value)}
+                    r="4"
+                    fill={line.color}
+                    stroke={SURFACE}
+                    strokeWidth="2"
+                  />
+                )}
+              </g>
+            );
+          })}
+
+          <line
+            className="chart-axis"
+            x1={pad.left}
+            x2={width - pad.right}
+            y1={pad.top + plotHeight + 0.5}
+            y2={pad.top + plotHeight + 0.5}
+          />
+
+          {periods.map((period, i) =>
+            i % stride === 0 || i === last ? (
+              <text
+                key={period}
+                className="chart-tick"
+                x={xOf(i)}
+                y={height - 6}
+                textAnchor={i === 0 ? "start" : i === last ? "end" : "middle"}
+              >
+                {formatPeriod(period)}
+              </text>
+            ) : null,
+          )}
+
+          {active !== null && (
+            <>
+              <line
+                className="chart-axis"
+                x1={xOf(active)}
+                x2={xOf(active)}
+                y1={pad.top}
+                y2={pad.top + plotHeight}
+              />
+              {series.map((line) => {
+                const point = byPeriod(line).get(periods[active]);
+                return point ? (
+                  <circle
+                    key={line.key}
+                    cx={xOf(active)}
+                    cy={yOf(point.value)}
+                    r="4.5"
+                    fill={line.color}
+                    stroke={SURFACE}
+                    strokeWidth="2"
+                  />
+                ) : null;
+              })}
+            </>
+          )}
+
+          <rect
+            className="chart-hit"
+            x={pad.left}
+            y={pad.top}
+            width={plotWidth}
+            height={plotHeight}
+            onMouseLeave={() => setActive(null)}
+            onMouseMove={(event) => {
+              const box = event.currentTarget.getBoundingClientRect();
+              const ratio = (event.clientX - box.left) / (box.width || 1);
+              setActive(Math.max(0, Math.min(last, Math.round(ratio * last))));
+            }}
+          />
+        </svg>
+      )}
+
+      {active !== null && periods[active] && (
+        <div className="tooltip" style={{ left: xOf(active), top: pad.top }}>
+          <div className="tooltip-title">{formatPeriod(periods[active])}</div>
+          {series.map((line) => {
+            const point = byPeriod(line).get(periods[active]);
+            if (!point) return null;
+            return (
+              <div key={line.key} className="tooltip-row">
+                <span className="swatch" style={{ background: line.color }} />
+                <span className="muted">{line.label}</span>
+                <span className="tooltip-value">
+                  {formatValue(point.value)}
+                </span>
+              </div>
+            );
+          })}
+          <div className="tooltip-title" style={{ marginTop: 5 }}>
+            {series
+              .map((line) => byPeriod(line).get(periods[active])?.count ?? 0)
+              .reduce((a, b) => a + b, 0)}{" "}
+            replies behind these
+          </div>
+        </div>
+      )}
+
+      {/* Two or more series always carry a legend. */}
+      <div className="legend">
+        {series.map((line) => (
+          <span key={line.key} className="legend-item">
+            <span className="swatch" style={{ background: line.color }} />
+            {line.label}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -168,7 +463,10 @@ export interface Slice {
 
 /** Keeps the three fixed hues and folds everything past them into "Other" —
  *  a generated fourth hue would be indistinguishable under CVD. */
-export function foldToSlices(entries: [string, number][], name: (key: string) => string): Slice[] {
+export function foldToSlices(
+  entries: [string, number][],
+  name: (key: string) => string,
+): Slice[] {
   const sorted = [...entries].sort((a, b) => b[1] - a[1]);
   const head = sorted.slice(0, SERIES.length).map(([key, value], i) => ({
     key,
@@ -197,20 +495,25 @@ export function ShareStrip({ slices }: { slices: Slice[] }) {
   return (
     <div>
       <div className="stack">
-        {slices.map((slice) => (
-          <div
-            key={slice.key}
-            className="stack-seg"
-            style={{
-              width: `${(slice.value / total) * 100}%`,
-              background: slice.color,
-              opacity: active === null || active === slice.key ? 1 : 0.42,
-            }}
-            onMouseEnter={() => setActive(slice.key)}
-            onMouseLeave={() => setActive(null)}
-            title={`${slice.label}: ${int(slice.value)}`}
-          />
-        ))}
+        {/* A zero-value slice draws nothing — the 3px floor keeps a tiny real
+         * value visible, but it would otherwise invent a sliver where there
+         * is no data at all. The legend still lists it. */}
+        {slices
+          .filter((slice) => slice.value > 0)
+          .map((slice) => (
+            <div
+              key={slice.key}
+              className="stack-seg"
+              style={{
+                width: `${(slice.value / total) * 100}%`,
+                background: slice.color,
+                opacity: active === null || active === slice.key ? 1 : 0.42,
+              }}
+              onMouseEnter={() => setActive(slice.key)}
+              onMouseLeave={() => setActive(null)}
+              title={`${slice.label}: ${int(slice.value)}`}
+            />
+          ))}
       </div>
       {/* Two or more series always carry a legend — identity is never color alone. */}
       <div className="legend">
@@ -249,7 +552,15 @@ export function ProbabilityBars({
         const isWinner = key === winner;
         return (
           <div key={key} className="share">
-            <span style={{ width: 132, fontSize: 12.5, color: isWinner ? "var(--text-primary)" : "var(--text-secondary)" }}>
+            <span
+              style={{
+                width: 132,
+                fontSize: 12.5,
+                color: isWinner
+                  ? "var(--text-primary)"
+                  : "var(--text-secondary)",
+              }}
+            >
               {format(key)}
             </span>
             <span className="share-track">
@@ -261,7 +572,9 @@ export function ProbabilityBars({
                 }}
               />
             </span>
-            <span className="share-value">{(probability * 100).toFixed(1)}%</span>
+            <span className="share-value">
+              {(probability * 100).toFixed(1)}%
+            </span>
           </div>
         );
       })}

@@ -2,7 +2,14 @@ import type { ReactNode } from "react";
 
 /* ------------------------------------------------------------------ icons */
 
-type IconName = "chats" | "analytics" | "messages" | "decisions" | "upload" | "trash";
+type IconName =
+  | "chats"
+  | "analytics"
+  | "assessment"
+  | "messages"
+  | "decisions"
+  | "upload"
+  | "trash";
 
 const PATHS: Record<IconName, ReactNode> = {
   chats: (
@@ -12,6 +19,12 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M4 16V9M9 16V4M14 16v-5" />
       <path d="M2.5 19h15" />
+    </>
+  ),
+  assessment: (
+    <>
+      <circle cx="10" cy="10" r="6.6" />
+      <path d="M10 6.4v3.8l2.6 1.6" />
     </>
   ),
   messages: (

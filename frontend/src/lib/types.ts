@@ -47,6 +47,15 @@ export interface Message {
   is_cold_closure: boolean;
 }
 
+/** One point of a latency trend: the median reply time over one period,
+ *  with the number of replies behind it — a median resting on three replies
+ *  should be visible as such. */
+export interface LatencyPoint {
+  period: string;
+  median_seconds: number;
+  reply_count: number;
+}
+
 /** How readily a participant answers. Latency is skewed by a few long gaps,
  *  so the median describes the usual wait and p90 the worst of it. */
 export interface Responsiveness {
@@ -58,6 +67,11 @@ export interface Responsiveness {
   /** Taken up while the question was still live (a one-hour window). */
   questions_answered_count: number;
   questions_answered_percent: number | null;
+  /** One point per week, or per month for a chat spanning over half a year. */
+  latency_trend: LatencyPoint[];
+  /** Positive when they are answering more slowly than they were. Read the
+   *  series; this only says which direction to look in. */
+  latency_drift_percent: number | null;
 }
 
 /** Who carries the conversation, and how they hold the floor. */
@@ -67,6 +81,7 @@ export interface Engagement {
   closed_count: number;
   turn_count: number;
   avg_messages_per_turn: number;
+  avg_words_per_turn: number;
   double_text_percent: number;
   cold_closure_count: number;
   cold_closure_percent: number;
@@ -84,11 +99,21 @@ export interface Expression {
   gratitude_count: number;
   self_reference_count: number;
   collective_reference_count: number;
+  absolutist_count: number;
+  elongation_count: number;
   exclamations_per_1k_words: number;
-  emoji_per_1k_words: number;
   affection_per_1k_words: number;
   apology_per_1k_words: number;
   gratitude_per_1k_words: number;
+  /** Stretched words: "soooo", سلاممم. Counted before normalization. */
+  elongation_per_1k_words: number;
+  /** Per HUNDRED words — emoji are frequent enough that per-thousand reads
+   *  badly. Do not rename this to match the others. */
+  emoji_per_100_words: number;
+  /** Al-Mosaiwi & Johnstone's absolutist dictionary, unabridged, so it
+   *  includes ordinary words like "all" and "must". Only meaningful next to
+   *  another participant in the same conversation. */
+  absolutism_percent: number;
   /** Share of first-person reference that is "we" rather than "I". */
   collective_focus_percent: number | null;
 }
@@ -161,4 +186,55 @@ export interface Health {
   app: string;
   database: string;
   decision_engine: Record<string, unknown>;
+}
+
+/* ---------------------------------------------------------- assessment */
+
+/** Per-participant read of the classifier's answers. Every figure here is a
+ *  reading rather than a count, and should be read against the assessment's
+ *  `coverage_percent`. */
+export interface ParticipantAssessment {
+  sender_id: string;
+  sender_name: string;
+  assessed_message_count: number;
+  positive_count: number;
+  neutral_count: number;
+  negative_count: number;
+  /** Positive messages per negative one; null when nothing read negative. */
+  positivity_ratio: number | null;
+  bid_count: number;
+  bids_met_count: number;
+  bids_met_percent: number | null;
+  criticism_count: number;
+  defensiveness_count: number;
+  contempt_count: number;
+  friction_percent: number;
+  repair_count: number;
+  repair_percent: number;
+  /** 0 (straightforward) to 3 (heavily barbed). */
+  avg_sarcasm_score: number | null;
+  statement_count: number;
+  closed_question_count: number;
+  open_question_count: number;
+  curiosity_per_1k_words: number;
+}
+
+export interface RelationalAssessment {
+  chat_id: number;
+  chat_name: string;
+  total_messages: number;
+  assessed_messages: number;
+  coverage_percent: number;
+  participants: ParticipantAssessment[];
+}
+
+/** What one paged assessment call got through. The pass is resumable: call
+ *  again with `next_offset` until `is_complete`. */
+export interface AssessmentProgress {
+  chat_id: number;
+  assessed_now: number;
+  skipped_already_done: number;
+  next_offset: number;
+  is_complete: boolean;
+  coverage_percent: number;
 }

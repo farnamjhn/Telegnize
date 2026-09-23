@@ -16,6 +16,8 @@ import {
   ColumnChart,
   type Point,
   ShareStrip,
+  TrendChart,
+  type TrendSeries,
   foldToSlices,
 } from "../components/charts";
 import { api } from "../lib/api";
@@ -30,8 +32,10 @@ import {
   minutes,
   pct,
   pctOrDash,
+  periodLabel,
   rate,
   ratio,
+  signedPct,
 } from "../lib/format";
 import type { Chat, ParticipantStats } from "../lib/types";
 import { useAsync } from "../lib/useAsync";
@@ -127,6 +131,12 @@ const COLUMNS: Record<MetricGroup, Column[]> = {
       render: (p) => pctOrDash(p.responsiveness.questions_answered_percent),
       hint: "Share the other party took up while the question was still live",
     },
+    {
+      key: "drift",
+      label: "Drift",
+      render: (p) => signedPct(p.responsiveness.latency_drift_percent),
+      hint: "Change from the first half of the trend to the second. Positive means answering more slowly — read the chart, not this number",
+    },
   ],
   engagement: [
     {
@@ -152,6 +162,11 @@ const COLUMNS: Record<MetricGroup, Column[]> = {
       key: "perTurn",
       label: "Msgs / turn",
       render: (p) => p.engagement.avg_messages_per_turn.toFixed(1),
+    },
+    {
+      key: "wordsPerTurn",
+      label: "Words / turn",
+      render: (p) => p.engagement.avg_words_per_turn.toFixed(1),
     },
     {
       key: "double",
@@ -188,7 +203,24 @@ const COLUMNS: Record<MetricGroup, Column[]> = {
       render: (p) => rate(p.expression.apology_per_1k_words),
       hint: '"sorry", ببخشید, شرمنده',
     },
-    { key: "emoji", label: "Emoji / 1k", render: (p) => rate(p.expression.emoji_per_1k_words) },
+    {
+      key: "emoji",
+      label: "Emoji / 100",
+      render: (p) => rate(p.expression.emoji_per_100_words),
+      hint: "Per hundred words — emoji are frequent enough that per-thousand reads badly",
+    },
+    {
+      key: "elongation",
+      label: "Elongation / 1k",
+      render: (p) => rate(p.expression.elongation_per_1k_words),
+      hint: 'Stretched words: "soooo", سلاممم — counted before normalization',
+    },
+    {
+      key: "absolutism",
+      label: "Absolutism",
+      render: (p) => pct(p.expression.absolutism_percent, 2),
+      hint: "Absolutist words as a share of everything they wrote. The unabridged dictionary includes ordinary words like \"all\" and \"must\", so read it next to the other participant, not on its own",
+    },
     {
       key: "exclamations",
       label: "Exclam. / 1k",
@@ -278,6 +310,44 @@ function Participants({ participants }: { participants: ParticipantStats[] }) {
           </tbody>
         </table>
       </div>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------- latency trend */
+
+const TREND_COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)"];
+
+function LatencyTrend({ participants }: { participants: ParticipantStats[] }) {
+  // Past three participants the lines stop being tellable apart, so the chart
+  // steps aside for the table, which carries every median anyway.
+  const series: TrendSeries[] = participants
+    .slice(0, TREND_COLORS.length)
+    .map((person, i) => ({
+      key: person.sender_id,
+      label: person.sender_name,
+      color: TREND_COLORS[i],
+      points: person.responsiveness.latency_trend.map((point) => ({
+        period: point.period,
+        value: point.median_seconds,
+        count: point.reply_count,
+      })),
+    }))
+    .filter((line) => line.points.length > 0);
+
+  if (series.length === 0) return null;
+
+  return (
+    <Card
+      title="Is it slowing down?"
+      subtitle="Median reply time per period. A median resting on few replies moves easily — the tooltip says how many are behind each point."
+    >
+      <TrendChart series={series} formatValue={duration} formatPeriod={periodLabel} />
+      {participants.length > TREND_COLORS.length && (
+        <p className="faint" style={{ fontSize: 12, marginTop: 4 }}>
+          Showing the {TREND_COLORS.length} most active participants. The table has the rest.
+        </p>
+      )}
     </Card>
   );
 }
@@ -517,6 +587,8 @@ export function AnalyticsView({
                   {languages.length ? <ShareStrip slices={languages} /> : <Empty title="No language data" />}
                 </Card>
               </div>
+
+              <LatencyTrend participants={participants} />
 
               {balance && (
                 <Card

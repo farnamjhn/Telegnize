@@ -1,8 +1,9 @@
 """Integration test for the Laya adapter.
 
-This one loads real model weights, so it is the slow test in the suite. Set
-TELEGNIZE_SKIP_MODEL_TESTS=1 to skip it when working offline; everything that
-depends on the engine is covered against a fake elsewhere.
+This one loads real model weights (hundreds of megabytes per checkpoint) and
+runs live inference, so it is skipped by default to avoid sustained local CPU
+load; everything that depends on the engine is covered against a fake
+elsewhere. Set TELEGNIZE_SKIP_MODEL_TESTS=0 to run it deliberately.
 """
 
 import os
@@ -12,7 +13,7 @@ from application.ports.decision_engine import DecisionQuestion
 from domain.models.analysis import DecisionType
 from infrastructure.decision_engine.laya_engine import LayaDecisionEngine
 
-SKIP = os.getenv("TELEGNIZE_SKIP_MODEL_TESTS") == "1"
+SKIP = os.getenv("TELEGNIZE_SKIP_MODEL_TESTS", "1") != "0"
 
 
 @unittest.skipIf(SKIP, "TELEGNIZE_SKIP_MODEL_TESTS=1")

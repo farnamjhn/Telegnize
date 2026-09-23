@@ -22,6 +22,9 @@ export const pct = (value: number, digits = 1): string =>
 /** Human response latency. `null` means the participant never answered anyone. */
 export function duration(seconds: number | null | undefined): string {
   if (seconds == null) return "—";
+  // Exactly zero is a real value (an instant reply, or an axis baseline);
+  // only a nonzero value too small to show rounds to "<1 s".
+  if (seconds === 0) return `0${NBSP}s`;
   if (seconds < 1) return `<1${NBSP}s`;
   if (seconds < 60) return `${Math.round(seconds)}${NBSP}s`;
   if (seconds < 3600) {
@@ -50,6 +53,28 @@ export function days(value: number): string {
  *  place; an exact zero stays "0" rather than "0.00". */
 export const rate = (value: number): string =>
   value === 0 ? "0" : value.toFixed(2);
+
+/** A signed change, where the sign carries the meaning. Large values are
+ *  expected when a conversation simply stops, so this compacts rather than
+ *  printing five digits. */
+export function signedPct(value: number | null | undefined): string {
+  if (value == null) return "—";
+  const sign = value > 0 ? "+" : "";
+  if (Math.abs(value) >= 1000) return `${sign}${compact(Math.round(value))}%`;
+  return `${sign}${value.toFixed(1)}%`;
+}
+
+/** "2025-W35" → "W35"; "2025-08" → "Aug 25". */
+export function periodLabel(period: string): string {
+  const week = period.match(/^(\d{4})-W(\d{1,2})$/);
+  if (week) return `W${week[2]}`;
+  const month = period.match(/^(\d{4})-(\d{2})$/);
+  if (month) {
+    const date = new Date(Number(month[1]), Number(month[2]) - 1, 1);
+    return `${date.toLocaleString("en-GB", { month: "short" })} ${month[1].slice(2)}`;
+  }
+  return period;
+}
 
 export const ratio = (value: number | null): string =>
   value == null ? "—" : `${value.toFixed(2)}×`;

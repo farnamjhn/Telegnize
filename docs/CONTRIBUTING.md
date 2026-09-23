@@ -67,8 +67,9 @@ uv run ruff check . --fix
 ```
 
 `tests/test_laya_engine.py` runs real model weights (~40s, needs network on
-first run). Set `TELEGNIZE_SKIP_MODEL_TESTS=1` to skip it; everything that
-depends on the engine is also covered against `tests/fakes.FakeDecisionEngine`.
+first run), so it is skipped by default. Set `TELEGNIZE_SKIP_MODEL_TESTS=0` to
+run it deliberately; everything that depends on the engine is also covered
+against `tests/fakes.FakeDecisionEngine`.
 
 ---
 
@@ -165,6 +166,15 @@ src/styles/     tokens.css (the theme) + base.css (everything else)
 - **A metric with no data says so.** Marker columns are written at ingest, so a
   chat imported before a metric existed reads as all-zero. The Expression table
   detects that and explains it rather than showing a wall of zeros.
+- **Counted and classified figures never share a view.** Analytics holds what
+  was counted; Assessment holds what the model read, behind its own coverage
+  figure. Do not promote an assessment number into an Analytics tile — the
+  whole point of the split is that the reader can tell which kind they are
+  looking at.
+- **Expensive work is driven by the user, one page at a time.** The assessment
+  pass can run for hours on a large chat, so the UI has no "assess everything"
+  button. It assesses one page per click, shows where to resume, and states the
+  cost before the first run.
 - **Plain CSS, one dark theme.** Every colour, radius and duration is a custom
   property in `tokens.css`; components reference roles, never raw hex. There is
   no CSS framework and no component library — a new widget is a class in
