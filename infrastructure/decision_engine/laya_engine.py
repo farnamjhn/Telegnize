@@ -26,6 +26,17 @@ logger = logging.getLogger(__name__)
 #: P(true) at or above which a noul question is answered "yes".
 NOUL_THRESHOLD = 0.5
 
+#: How many checkpoints the router may hold in memory at once.
+#:
+#: Laya's router defaults to one and evicts on every switch, which is the
+#: single most expensive thing about a long run: it routes by script, so a chat
+#: that mixes English and anything else alternates, and each alternation
+#: rebuilds a checkpoint from hundreds of megabytes on disk before it can
+#: answer. Two is what routing between the English and multilingual checkpoints
+#: needs. The third checkpoint Laya ships, typed-decisions, is only reached by
+#: an explicit request, which this adapter never makes.
+RESIDENT_CHECKPOINTS = 2
+
 # Where each answer type carries its value in Laya's response.
 _VALUE_KEYS: dict[DecisionType, str] = {
     DecisionType.CHOICE: "choice",
@@ -38,11 +49,20 @@ class LayaDecisionEngine(IDecisionEngine):
     """Wraps ``laya.Router``, loading the checkpoints on first prediction.
 
     Construction is cheap and does no I/O: the checkpoints are hundreds of
-    megabytes, so an app that never asks a question never pays for them.
+    megabytes, so an app that never asks a question never pays for them. What
+    it does decide up front is how many of them may stay resident once loaded —
+    see :data:`RESIDENT_CHECKPOINTS`, which is the difference between a
+    mixed-script chat paying for a checkpoint build on a large share of its
+    messages and paying for it twice.
     """
 
-    def __init__(self, preload: bool = False) -> None:
+    def __init__(
+        self,
+        preload: bool = False,
+        resident_checkpoints: int = RESIDENT_CHECKPOINTS,
+    ) -> None:
         self._preload = preload
+        self._resident_checkpoints = max(1, resident_checkpoints)
         self._router: Any | None = None
         self._lock = threading.Lock()
         if preload:
@@ -55,8 +75,14 @@ class LayaDecisionEngine(IDecisionEngine):
                 if self._router is None:
                     from laya import Router  # imported late: heavy, optional
 
-                    logger.info("Loading Laya router (preload=%s).", self._preload)
-                    self._router = Router(preload=self._preload)
+                    logger.info(
+                        "Loading Laya router (preload=%s, resident=%d).",
+                        self._preload, self._resident_checkpoints,
+                    )
+                    self._router = Router(
+                        preload=self._preload,
+                        max_loaded=self._resident_checkpoints,
+                    )
         return self._router
 
     @property

@@ -159,16 +159,11 @@ so they stay meaningful in a group chat where a two-way ratio would not.
 
 ### Cost — measure before you commit to a run
 
-Assessment runs a model over every message, on CPU, and it is expensive. How
-expensive is not something this page can tell you:
-
-- Non-Latin text routes to a larger multilingual checkpoint than English does.
-- Sustained inference throttles a laptop, so the tenth minute is slower than
-  the first.
-
-Local measurements of the six-question set spread from under a second to
-roughly ten seconds per message **on the same machine**. At the top of that
-range, three thousand messages is most of a working day with the CPU pinned.
+Assessment runs a model over every message, and it is expensive. How expensive
+is not something this page can tell you: it depends on the device torch finds
+(an Apple or NVIDIA GPU where there is one, otherwise the CPU), a machine under
+sustained load throttles, and non-Latin text routes to a larger multilingual
+checkpoint than English does.
 
 So time one small page on the hardware you intend to use, then decide:
 
@@ -176,8 +171,27 @@ So time one small page on the hardware you intend to use, then decide:
 time curl -X POST "localhost:8000/api/assessments/1?offset=0&limit=5"
 ```
 
-The first call also pays a one-off checkpoint load of about a minute. Set
+Time a page of mixed languages if the chat has them, because that is where the
+two settings below bite.
+
+The first call pays a one-off checkpoint load. Set
 `TELEGNIZE_PRELOAD_DECISION_ENGINE=1` to take that at startup instead.
+
+**Both routed checkpoints stay resident.** Laya routes by script and, left at
+its own default, keeps one checkpoint in memory and rebuilds the other from
+several hundred megabytes on disk whenever the script changes. In a chat that
+mixes English with anything else that is not an edge case: on the Persian and
+English export this was measured against, 42% of messages changed the routing
+from the message before them, so 42% of them paid a checkpoint build before
+they could be answered. `TELEGNIZE_RESIDENT_CHECKPOINTS` is 2 for that reason.
+Turn it down to 1 only on a machine that cannot hold both.
+
+**Repeated text is answered once.** Chat repeats itself — a third of the
+messages in that same export said something an earlier message had already said
+word for word, and one recurring two-emoji reply accounted for 2,943 of 42,465.
+The engine sees only the sender and the text, so identical pairs are one
+question; `TELEGNIZE_DECISION_CACHE_ENTRIES` answers from memory instead of
+re-running the pass, and `0` turns that off.
 
 The pass is **paged and resumable**: each POST works through `limit` messages
 from `offset`, skips anything already answered, and returns `next_offset` and

@@ -140,6 +140,8 @@ Every setting is an environment variable prefixed `TELEGNIZE_`:
 | `TELEGNIZE_ASSESSMENT_PAGE_SIZE` | `25` | Messages assessed per call |
 | `TELEGNIZE_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Comma-separated browser origins — the default is where `frontend/` dev-serves |
 | `TELEGNIZE_PRELOAD_DECISION_ENGINE` | `0` | `1` loads model weights at startup |
+| `TELEGNIZE_RESIDENT_CHECKPOINTS` | `2` | Checkpoints held in memory at once — below 2, a chat that mixes scripts rebuilds one per switch |
+| `TELEGNIZE_DECISION_CACHE_ENTRIES` | `10000` | Engine answers memoised, so repeated text is read once; `0` disables |
 
 ## Tests
 

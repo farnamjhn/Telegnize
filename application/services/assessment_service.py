@@ -1,12 +1,13 @@
 """Runs the decision engine over a chat's messages and aggregates the answers.
 
 A full pass is expensive, and how expensive is not predictable from here: it is
-CPU inference, the multilingual checkpoint that non-Latin text routes to is
-slower than the English one, and a laptop under sustained load throttles. Local
-measurements of the six-question set ranged from under a second to roughly ten
-seconds per message on the same machine. Treat a few thousand messages as hours
-of saturated CPU, and measure a small page on the target hardware before
-starting a long run.
+local inference, the multilingual checkpoint that non-Latin text routes to is
+slower than the English one, and a machine under sustained load throttles. Two
+things that used to dominate a run no longer do — the engine keeps both routed
+checkpoints resident rather than rebuilding one whenever the script changes,
+and text a previous message already said is answered once — but what is left is
+still a forward pass per message. Measure a small page on the target hardware
+before starting a long run.
 
 So assessment is paged and resumable: each call works through one page, skips
 anything already answered, and reports where to pick up. Answers land in the
