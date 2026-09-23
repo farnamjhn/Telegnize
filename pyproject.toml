@@ -3,6 +3,8 @@ name = "telegnize"
 version = "0.3.0"
 description = "Telegram chat export analyzer with multilingual NLP and typed decisions"
 readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141.1",

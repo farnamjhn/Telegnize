@@ -93,6 +93,7 @@ class TelegramJsonParser(IExportReader):
                 or payload.get("forwarded_from_id")
                 or payload.get("is_forwarded")
             ),
+            duration_seconds=_as_int(payload.get("duration_seconds")) or 0,
         )
 
     # --- whole documents (small inputs only) ------------------------------

@@ -1,6 +1,6 @@
 """Test doubles for the application's outbound ports."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from application.ports.decision_engine import (
@@ -20,9 +20,15 @@ class FakeDecisionEngine(IDecisionEngine):
     of model weights.
     """
 
-    def __init__(self, fail_with: str | None = None) -> None:
+    def __init__(
+        self,
+        fail_with: str | None = None,
+        answers: Mapping[str, Any] | None = None,
+    ) -> None:
         self.calls: list[tuple[Any, Sequence[DecisionQuestion]]] = []
         self._fail_with = fail_with
+        #: Forced answers by question key, for tests that need a known reading.
+        self._answers = dict(answers or {})
 
     @property
     def is_ready(self) -> bool:
@@ -44,8 +50,18 @@ class FakeDecisionEngine(IDecisionEngine):
             metadata={"checkpoint": "fake-checkpoint"},
         )
 
+    def _answer(self, question: DecisionQuestion) -> EngineAnswer:
+        if question.key in self._answers:
+            return EngineAnswer(
+                question_key=question.key,
+                decision_type=question.decision_type,
+                value=self._answers[question.key],
+                confidence=0.9,
+            )
+        return self._default_answer(question)
+
     @staticmethod
-    def _answer(question: DecisionQuestion) -> EngineAnswer:
+    def _default_answer(question: DecisionQuestion) -> EngineAnswer:
         """Answers in the same shapes the real adapter produces."""
         if question.decision_type is DecisionType.CHOICE:
             choices = list(question.criteria)

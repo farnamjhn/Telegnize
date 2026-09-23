@@ -13,6 +13,7 @@ from application.ports.decision_engine import IDecisionEngine
 from application.ports.export_reader import IExportReader
 from application.ports.text_normalizer import ITextNormalizer
 from application.services.analytics_service import AnalyticsService
+from application.services.assessment_service import AssessmentService
 from application.services.chat_service import ChatService
 from application.services.decision_service import DecisionService
 from application.services.ingestion_service import IngestionService
@@ -21,6 +22,7 @@ from domain.repository.chat_repository import IChatRepository
 from domain.repository.decision_repository import IDecisionRepository
 from domain.repository.message_repository import IMessageRepository
 from infrastructure.config import Settings
+from infrastructure.decision_engine.caching_engine import CachingDecisionEngine
 from infrastructure.decision_engine.laya_engine import LayaDecisionEngine
 from infrastructure.nlp.normalizer import get_normalizer
 from infrastructure.parser.telegram_parser import TelegramJsonParser
@@ -55,7 +57,22 @@ class Container:
 
     @cached_property
     def decision_engine(self) -> IDecisionEngine:
-        return LayaDecisionEngine(preload=self.settings.preload_decision_engine)
+        """The engine, behind an answer cache unless one is configured away.
+
+        The cache belongs here rather than inside the adapter: it is true of
+        any engine that the same question about the same state has the same
+        answer, and holding it at the composition root is what lets one cache
+        serve every service that asks.
+        """
+        engine: IDecisionEngine = LayaDecisionEngine(
+            preload=self.settings.preload_decision_engine,
+            resident_checkpoints=self.settings.resident_checkpoints,
+        )
+        if self.settings.decision_cache_entries <= 0:
+            return engine
+        return CachingDecisionEngine(
+            engine, max_entries=self.settings.decision_cache_entries
+        )
 
     # --- repositories -----------------------------------------------------
     @cached_property
@@ -64,7 +81,16 @@ class Container:
 
     @cached_property
     def message_repository(self) -> IMessageRepository:
-        return SQLiteMessageRepository(self.database)
+        return SQLiteMessageRepository(
+            self.database,
+            reply_window_seconds=self.settings.reply_window_seconds,
+            turn_window_seconds=self.settings.turn_window_seconds,
+            session_gap_seconds=self.settings.session_gap_seconds,
+            uptake_window_seconds=self.settings.uptake_window_seconds,
+            silence_seconds=self.settings.silence_seconds,
+            collision_seconds=self.settings.collision_seconds,
+            burst_floor=self.settings.burst_floor,
+        )
 
     @cached_property
     def decision_repository(self) -> IDecisionRepository:
@@ -90,7 +116,22 @@ class Container:
 
     @cached_property
     def analytics_service(self) -> AnalyticsService:
-        return AnalyticsService(self.chat_repository, self.message_repository)
+        return AnalyticsService(
+            self.chat_repository,
+            self.message_repository,
+            active_session_seconds=self.settings.active_session_seconds,
+            last_word_gap_seconds=self.settings.last_word_gap_seconds,
+        )
+
+    @cached_property
+    def assessment_service(self) -> AssessmentService:
+        return AssessmentService(
+            chat_repo=self.chat_repository,
+            message_repo=self.message_repository,
+            decision_repo=self.decision_repository,
+            engine=self.decision_engine,
+            page_size=self.settings.assessment_page_size,
+        )
 
     @cached_property
     def decision_service(self) -> DecisionService:

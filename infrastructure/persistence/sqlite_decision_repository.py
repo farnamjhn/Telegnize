@@ -77,6 +77,76 @@ class SQLiteDecisionRepository(IDecisionRepository):
             ).fetchall()
         return [self._to_entity(row) for row in rows]
 
+    # --- assessment bookkeeping ------------------------------------------
+    def answered_message_ids(
+        self, message_ids: Sequence[int], question_key: str
+    ) -> set[int]:
+        if not message_ids:
+            return set()
+        placeholders = ", ".join("?" * len(message_ids))
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                f"SELECT target_id FROM decisions "
+                f"WHERE target_type = 'message' AND question_key = ? "
+                f"AND target_id IN ({placeholders});",
+                (question_key, *message_ids),
+            ).fetchall()
+        return {row["target_id"] for row in rows}
+
+    def count_answered_in_chat(self, chat_id: int, question_key: str) -> int:
+        with self._db.connect() as conn:
+            return conn.execute(
+                f"SELECT COUNT(*) {_JOIN_MESSAGES};",
+                {"chat_id": chat_id, "question_key": question_key},
+            ).fetchone()[0]
+
+    def count_values_by_sender(
+        self, chat_id: int, question_key: str
+    ) -> dict[str, dict[str, int]]:
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                f"SELECT m.sender_id AS sender_id, d.result_value AS value, "
+                f"COUNT(*) AS total {_JOIN_MESSAGES} "
+                f"GROUP BY m.sender_id, d.result_value;",
+                {"chat_id": chat_id, "question_key": question_key},
+            ).fetchall()
+
+        counts: dict[str, dict[str, int]] = {}
+        for row in rows:
+            # Values are stored as JSON, so "positive" arrives quoted and a
+            # noul arrives as true/false rather than a Python bool.
+            value = _load_json(row["value"], default=row["value"])
+            key = str(value).lower() if isinstance(value, bool) else str(value)
+            counts.setdefault(row["sender_id"], {})[key] = row["total"]
+        return counts
+
+    def average_value_by_sender(
+        self, chat_id: int, question_key: str
+    ) -> dict[str, float]:
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                f"SELECT m.sender_id AS sender_id, "
+                f"AVG(CAST(d.result_value AS REAL)) AS mean, COUNT(*) AS total "
+                f"{_JOIN_MESSAGES} GROUP BY m.sender_id;",
+                {"chat_id": chat_id, "question_key": question_key},
+            ).fetchall()
+        return {
+            row["sender_id"]: float(row["mean"])
+            for row in rows
+            if row["mean"] is not None
+        }
+
+
+#: Decisions about messages are joined back to the message they describe, which
+#: is what carries the chat and the sender.
+_JOIN_MESSAGES = """
+    FROM decisions d
+    JOIN messages m ON m.id = d.target_id
+    WHERE d.target_type = 'message'
+      AND m.chat_id = :chat_id
+      AND d.question_key = :question_key
+"""
+
 
 def _load_json(raw: Any, default: Any) -> Any:
     """Decodes a JSON column, falling back rather than failing a whole read."""
