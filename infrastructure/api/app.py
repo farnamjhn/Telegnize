@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from application.ports.decision_engine import DecisionEngineError
-from domain.errors import InvalidExportError, NotFoundError
+from domain.errors import BusyError, InvalidExportError, NotFoundError
 from infrastructure.api.container import Container
 from infrastructure.api.routers import (
     analytics,
@@ -110,6 +110,12 @@ def _register_error_handlers(app: FastAPI) -> None:
     async def _not_found(_: Request, error: NotFoundError) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND, content={"detail": str(error)}
+        )
+
+    @app.exception_handler(BusyError)
+    async def _busy(_: Request, error: BusyError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT, content={"detail": str(error)}
         )
 
     @app.exception_handler(InvalidExportError)

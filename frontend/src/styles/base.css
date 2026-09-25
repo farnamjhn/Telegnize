@@ -593,6 +593,12 @@ a {
   white-space: nowrap;
 }
 
+/* `.table th` outranks `.num`, so a figure column's header needs saying twice
+ * or it sits left while its figures sit right. */
+.table th.num {
+  text-align: end;
+}
+
 .table td {
   padding: 11px var(--pad-card);
   border-bottom: 1px solid var(--border);

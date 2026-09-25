@@ -243,6 +243,9 @@ class DecisionDTO(BaseModel):
     result_value: Any
     confidence: float
     probabilities: dict[str, float] = {}
+    #: What the engine said about how it answered — which checkpoint, and for
+    #: a whole-chat reading how much of the chat it covered.
+    engine_metadata: dict[str, Any] = {}
     created_at: datetime | None = None
 
     @classmethod
@@ -296,3 +299,25 @@ class AssessmentProgressDTO(BaseModel):
     next_offset: int
     is_complete: bool
     coverage_percent: float
+
+
+class AssessmentRunDTO(BaseModel):
+    """How far a background assessment run has got. Poll it while it works."""
+
+    model_config = _FROM_DOMAIN
+
+    chat_id: int
+    state: str
+    is_active: bool
+    page_size: int
+    max_pages: int | None = None
+    started_offset: int
+    next_offset: int
+    pages: int
+    assessed: int
+    skipped: int
+    coverage_percent: float
+    elapsed_seconds: float
+    last_page_seconds: float | None = None
+    seconds_per_message: float | None = None
+    error: str | None = None

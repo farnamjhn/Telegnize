@@ -27,3 +27,7 @@ class MessageNotFoundError(NotFoundError):
 
 class InvalidExportError(TelegnizeError):
     """The supplied file is not a readable Telegram export."""
+
+
+class BusyError(TelegnizeError):
+    """The request conflicts with work already in progress."""

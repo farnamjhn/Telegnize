@@ -7,6 +7,7 @@
 
 import type {
   AssessmentProgress,
+  AssessmentRun,
   Chat,
   ChatAnalytics,
   Decision,
@@ -109,6 +110,18 @@ export const api = {
       { method: "POST" },
     ),
 
+  /** Starts a background run: `pages` of `limit` messages, or to the end
+   *  when `pages` is null. Returns at once; poll `assessmentRun`. */
+  startAssessmentRun: (chatId: number, offset: number, limit: number, pages: number | null) =>
+    request<AssessmentRun>(
+      `/assessments/${chatId}/run?offset=${offset}&limit=${limit}` +
+        (pages == null ? "" : `&pages=${pages}`),
+      { method: "POST" },
+    ),
+  assessmentRun: (chatId: number) => request<AssessmentRun>(`/assessments/${chatId}/run`),
+  stopAssessmentRun: (chatId: number) =>
+    request<AssessmentRun>(`/assessments/${chatId}/run`, { method: "DELETE" }),
+
   listMessages: (params: {
     chatId?: number;
     senderId?: string;
@@ -130,7 +143,9 @@ export const api = {
   cachedMessageDecisions: (id: number) =>
     request<Decision[]>(`/decisions/messages/${id}`),
 
-  evaluateChat: (id: number, limit: number | null) =>
-    request<Decision[]>(`/decisions/chats/${id}`, json({ limit })),
+  /** The most recent `limit` messages, or with `wholeChat` windows of that
+   *  size sampled across the whole chat and combined. */
+  evaluateChat: (id: number, limit: number, wholeChat: boolean) =>
+    request<Decision[]>(`/decisions/chats/${id}`, json({ limit, whole_chat: wholeChat })),
   cachedChatDecisions: (id: number) => request<Decision[]>(`/decisions/chats/${id}`),
 };

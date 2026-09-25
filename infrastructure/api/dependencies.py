@@ -10,6 +10,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from application.services.analytics_service import AnalyticsService
+from application.services.assessment_runner import AssessmentRunner
 from application.services.assessment_service import AssessmentService
 from application.services.chat_service import ChatService
 from application.services.decision_service import DecisionService
@@ -55,6 +56,12 @@ def get_assessment_service(
     return container.assessment_service
 
 
+def get_assessment_runner(
+    container: Container = Depends(get_container),
+) -> AssessmentRunner:
+    return container.assessment_runner
+
+
 def get_decision_service(
     container: Container = Depends(get_container),
 ) -> DecisionService:
@@ -69,3 +76,4 @@ IngestionServiceDep = Annotated[IngestionService, Depends(get_ingestion_service)
 AnalyticsServiceDep = Annotated[AnalyticsService, Depends(get_analytics_service)]
 DecisionServiceDep = Annotated[DecisionService, Depends(get_decision_service)]
 AssessmentServiceDep = Annotated[AssessmentService, Depends(get_assessment_service)]
+AssessmentRunnerDep = Annotated[AssessmentRunner, Depends(get_assessment_runner)]

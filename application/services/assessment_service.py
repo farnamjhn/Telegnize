@@ -6,7 +6,8 @@ slower than the English one, and a machine under sustained load throttles. Two
 things that used to dominate a run no longer do — the engine keeps both routed
 checkpoints resident rather than rebuilding one whenever the script changes,
 and text a previous message already said is answered once — but what is left is
-still a forward pass per message. Measure a small page on the target hardware
+still a forward pass per message. A page is put to the engine as one batch, so
+those passes can share work, but measure a small page on the target hardware
 before starting a long run.
 
 So assessment is paged and resumable: each call works through one page, skips
@@ -91,12 +92,13 @@ class AssessmentService:
             [message.id for message in page], _COVERAGE_KEY
         )
 
-        assessed = 0
-        for position, message in enumerate(page):
-            if message.id in already_done or not message.analysis_text.strip():
-                continue
-            self._assess_message(message, page[position + 1 :])
-            assessed += 1
+        pending = [
+            (position, message)
+            for position, message in enumerate(page)
+            if message.id not in already_done and message.analysis_text.strip()
+        ]
+        self._assess_messages(pending, page)
+        assessed = len(pending)
 
         total = self._messages.count_by_chat(chat_id)
         next_offset = offset + len(page)
@@ -113,53 +115,89 @@ class AssessmentService:
             coverage_percent=self._coverage(chat_id, total),
         )
 
-    def _assess_message(self, message: Message, following: Sequence[Message]) -> None:
-        """Answers the question set about one message, and about its reply."""
-        result = self._engine.predict(
-            {"sender": message.sender_name, "text": message.analysis_text},
+    def _assess_messages(
+        self,
+        pending: Sequence[tuple[int, Message]],
+        page: Sequence[Message],
+    ) -> None:
+        """Answers the question set about each pending message, then about the
+        replies to whichever of them turned out to be bids.
+
+        Two batched calls rather than one or two per message: the engine can
+        share forward passes between the states in a batch, which a loop of
+        single predictions never lets it do. The second batch has to wait on
+        the first, because only a bid's reply is put to the engine.
+        """
+        if not pending:
+            return
+
+        results = self._engine.predict_batch(
+            [
+                {"sender": message.sender_name, "text": message.analysis_text}
+                for _, message in pending
+            ],
             ASSESSMENT_QUESTIONS,
         )
-        decisions = [
-            Decision(
-                target_type=DecisionTarget.MESSAGE,
-                target_id=message.id,
-                question_key=answer.question_key,
-                decision_type=answer.decision_type,
-                result_value=answer.value,
-                confidence=answer.confidence,
-                probabilities=answer.probabilities,
-                engine_metadata=result.metadata,
+
+        decisions: list[Decision] = []
+        bids: list[tuple[Message, Message]] = []
+        for (position, message), result in zip(pending, results, strict=True):
+            decisions.extend(
+                Decision(
+                    target_type=DecisionTarget.MESSAGE,
+                    target_id=message.id,
+                    question_key=answer.question_key,
+                    decision_type=answer.decision_type,
+                    result_value=answer.value,
+                    confidence=answer.confidence,
+                    probabilities=answer.probabilities,
+                    engine_metadata=result.metadata,
+                )
+                for answer in result.answers.values()
             )
-            for answer in result.answers.values()
-        ]
+            bid = result.answers.get("is_bid")
+            reply = _next_from_another_sender(message, page[position + 1 :])
+            if bid is not None and bid.value and reply is not None:
+                bids.append((message, reply))
 
-        bid = result.answers.get("is_bid")
-        reply = _next_from_another_sender(message, following)
-        if bid is not None and bid.value and reply is not None:
-            decisions.append(self._assess_reply(message, reply))
-
+        decisions.extend(self._assess_replies(bids))
         self._decisions.save_batch(decisions)
 
-    def _assess_reply(self, bid: Message, reply: Message) -> Decision:
-        """Asks whether ``reply`` turned toward the bid in ``bid``."""
-        result = self._engine.predict(
-            {
-                "previous_message": bid.analysis_text,
-                "response": reply.analysis_text,
-            },
+    def _assess_replies(
+        self, pairs: Sequence[tuple[Message, Message]]
+    ) -> list[Decision]:
+        """Asks, for each (bid, reply), whether the reply turned toward the bid."""
+        if not pairs:
+            return []
+        results = self._engine.predict_batch(
+            [
+                {
+                    "previous_message": bid.analysis_text,
+                    "response": reply.analysis_text,
+                }
+                for bid, reply in pairs
+            ],
             RESPONSE_QUESTIONS,
         )
-        answer = result.answers["turns_toward"]
-        return Decision(
-            target_type=DecisionTarget.MESSAGE,
-            target_id=bid.id,
-            question_key=_BID_MET_KEY,
-            decision_type=answer.decision_type,
-            result_value=answer.value,
-            confidence=answer.confidence,
-            probabilities=answer.probabilities,
-            engine_metadata={**result.metadata, "response_message_id": reply.id},
-        )
+        decisions = []
+        for (bid, reply), result in zip(pairs, results, strict=True):
+            answer = result.answers["turns_toward"]
+            decisions.append(
+                Decision(
+                    target_type=DecisionTarget.MESSAGE,
+                    target_id=bid.id,
+                    question_key=_BID_MET_KEY,
+                    decision_type=answer.decision_type,
+                    result_value=answer.value,
+                    confidence=answer.confidence,
+                    probabilities=answer.probabilities,
+                    engine_metadata={
+                        **result.metadata,
+                        "response_message_id": reply.id,
+                    },
+                )
+            )
+        return decisions
 
     # --- reading ----------------------------------------------------------
     def get_assessment(self, chat_id: int) -> RelationalAssessmentDTO:

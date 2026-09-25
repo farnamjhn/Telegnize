@@ -46,6 +46,48 @@ class TestAnswerCache(unittest.TestCase):
         self.engine.predict({"text": "ok", "sender": "Alice"}, [TONE])
         self.assertEqual(len(self.inner.calls), 1)
 
+    def test_a_batch_only_sends_what_the_cache_cannot_answer(self):
+        self.engine.predict({"text": "ok"}, [TONE])
+        results = self.engine.predict_batch(
+            [{"text": "ok"}, {"text": "new"}], [TONE]
+        )
+        self.assertEqual(len(results), 2)
+        self.assertEqual(self.inner.batch_calls[-1][0], [{"text": "new"}])
+
+    def test_a_state_repeated_inside_a_batch_is_asked_once(self):
+        states = [{"text": "😭"}, {"text": "hi"}, {"text": "😭"}, {"text": "😭"}]
+        results = self.engine.predict_batch(states, [TONE])
+
+        self.assertEqual(len(results), 4)
+        self.assertEqual(
+            self.inner.batch_calls[-1][0], [{"text": "😭"}, {"text": "hi"}]
+        )
+        self.assertEqual((self.engine.hits, self.engine.misses), (2, 2))
+        # Each position gets its own copy, not one shared mapping.
+        self.assertIsNot(results[0].answers, results[2].answers)
+
+    def test_a_batch_keeps_the_order_it_was_given(self):
+        inner = FakeDecisionEngine()
+        engine = CachingDecisionEngine(inner)
+        engine.predict({"text": "b"}, [TONE])
+        results = engine.predict_batch(
+            [{"text": "a"}, {"text": "b"}, {"text": "c"}], [TONE]
+        )
+        seen = [state for state, _ in inner.calls]
+        self.assertEqual(seen, [{"text": "b"}, {"text": "a"}, {"text": "c"}])
+        self.assertEqual(len(results), 3)
+
+    def test_an_unserialisable_state_in_a_batch_goes_straight_through(self):
+        circular: dict = {"text": "hello"}
+        circular["self"] = circular
+        results = self.engine.predict_batch([circular, {"text": "ok"}], [TONE])
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(
+            [state is circular for state in self.inner.batch_calls[-1][0]],
+            [False, True],
+        )
+
     def test_a_different_state_is_a_different_question(self):
         self.engine.predict({"text": "ok"}, [TONE])
         self.engine.predict({"text": "not ok"}, [TONE])

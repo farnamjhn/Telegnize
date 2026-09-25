@@ -98,6 +98,24 @@ class TestAssessmentPass(AssessmentTestCase):
         self.assertTrue(third.is_complete)
         self.assertEqual(third.coverage_percent, 100.0)
 
+    def test_a_page_goes_to_the_engine_as_one_batch(self):
+        self.given_messages(*[("u1", f"message {i}") for i in range(5)])
+        self.service().assess_page(self.chat.id)
+        self.assertEqual(len(self.engine.batch_calls), 1)
+        self.assertEqual(len(self.engine.batch_calls[0][0]), 5)
+
+    def test_bids_on_a_page_are_scored_as_a_second_batch(self):
+        self.given_messages(
+            ("u1", "look"), ("u2", "nice"), ("u1", "and this"), ("u2", "wow")
+        )
+        self.service(
+            FakeDecisionEngine(answers={"is_bid": True, "turns_toward": True})
+        ).assess_page(self.chat.id)
+        # Every message, then the three bids that have a reply on the page.
+        self.assertEqual(
+            [len(states) for states, _ in self.engine.batch_calls], [4, 3]
+        )
+
     def test_messages_without_text_are_left_alone(self):
         self.given_messages(("u1", ""), ("u2", "   "))
         progress = self.service().assess_page(self.chat.id)

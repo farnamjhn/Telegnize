@@ -26,6 +26,7 @@ class FakeDecisionEngine(IDecisionEngine):
         answers: Mapping[str, Any] | None = None,
     ) -> None:
         self.calls: list[tuple[Any, Sequence[DecisionQuestion]]] = []
+        self.batch_calls: list[tuple[list[Any], Sequence[DecisionQuestion]]] = []
         self._fail_with = fail_with
         #: Forced answers by question key, for tests that need a known reading.
         self._answers = dict(answers or {})
@@ -49,6 +50,14 @@ class FakeDecisionEngine(IDecisionEngine):
             },
             metadata={"checkpoint": "fake-checkpoint"},
         )
+
+    def predict_batch(
+        self, states: Sequence[Any], questions: Sequence[DecisionQuestion]
+    ) -> list[EngineResult]:
+        # Recorded as well as answered through ``predict``, so ``calls`` still
+        # counts every state the engine was shown.
+        self.batch_calls.append((list(states), questions))
+        return super().predict_batch(states, questions)
 
     def _answer(self, question: DecisionQuestion) -> EngineAnswer:
         if question.key in self._answers:

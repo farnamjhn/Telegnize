@@ -18,6 +18,19 @@ function confidenceBand(confidence: number): { label: string; color: string } {
   return { label: "Low confidence", color: "var(--critical)" };
 }
 
+/** For a whole-chat reading, how much of the chat it actually read. */
+function coverageNote(decision: Decision): string | null {
+  const meta = decision.engine_metadata ?? {};
+  if (meta.scope !== "whole_chat") return null;
+  const windows = Number(meta.windows);
+  const read = Number(meta.messages_read);
+  const total = Number(meta.total_messages);
+  return (
+    `Combined from ${windows.toLocaleString("en-US")} window${windows === 1 ? "" : "s"} ` +
+    `across the chat — ${read.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} messages read.`
+  );
+}
+
 function DecisionCard({ decision }: { decision: Decision }) {
   const band = confidenceBand(decision.confidence);
   const winner = typeof decision.result_value === "string" ? decision.result_value : undefined;
@@ -50,6 +63,12 @@ function DecisionCard({ decision }: { decision: Decision }) {
             format={humanize}
           />
         </div>
+      )}
+
+      {coverageNote(decision) && (
+        <p className="muted" style={{ fontSize: 12, marginTop: 14 }}>
+          {coverageNote(decision)}
+        </p>
       )}
 
       {decision.created_at && (
@@ -98,7 +117,7 @@ export function DecisionsView({
       const result =
         mode === "chat"
           ? kind === "run"
-            ? await api.evaluateChat(chatId!, wholeChat ? null : windowSize)
+            ? await api.evaluateChat(chatId!, windowSize, wholeChat)
             : await api.cachedChatDecisions(chatId!)
           : kind === "run"
             ? await api.evaluateMessage(messageTarget!)
@@ -272,7 +291,7 @@ export function DecisionsView({
               body={
                 mode === "chat"
                   ? wholeChat
-                    ? "Evaluate reads every message in the chat and asks about the relationship dynamic and the overall sentiment."
+                    ? "Evaluate reads windows spread evenly across the whole chat — up to 40 of them — asks each about the relationship dynamic and the overall sentiment, and combines the answers."
                     : "Evaluate reads the chat's most recent window and asks about the relationship dynamic and the overall sentiment."
                   : "Pick a message — from here or from the Messages tab — and Evaluate asks about its tone and whether it carries conflict."
               }

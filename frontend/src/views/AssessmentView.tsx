@@ -1,17 +1,80 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ChatSelect } from "../App";
 import { Card, Empty, Field, Hero, Notice, Spinner, Toggle } from "../components/Primitives";
 import { ShareStrip, type Slice } from "../components/charts";
 import { ApiError, api } from "../lib/api";
 import { compact, int, pct, pctOrDash, rate } from "../lib/format";
-import type { AssessmentProgress, Chat, ParticipantAssessment } from "../lib/types";
+import type { AssessmentRun, Chat, ParticipantAssessment } from "../lib/types";
 import { useAsync } from "../lib/useAsync";
 
 /** Small by default. A full pass runs a model over every message, which on a
  *  large chat is hours — so the page size is a deliberate choice, not a
  *  default to fall into. Time a page before raising it. */
 const PAGE_SIZES = [5, 25, 50, 100, 200];
+
+/** How often a running assessment is asked how far it has got. */
+const POLL_MS = 1000;
+
+function seconds(value: number): string {
+  if (value < 60) return `${value.toFixed(1)}s`;
+  const minutes = Math.floor(value / 60);
+  return `${minutes}m ${Math.round(value % 60)}s`;
+}
+
+/** What the background run is doing, in a sentence. */
+function RunNotice({ run }: { run: AssessmentRun }) {
+  const counts =
+    `${int(run.assessed)} assessed` +
+    (run.skipped > 0 ? `, ${int(run.skipped)} already done` : "") +
+    ` in ${seconds(run.elapsed_seconds)}` +
+    (run.seconds_per_message != null ? ` (${run.seconds_per_message.toFixed(2)}s a message)` : "");
+
+  switch (run.state) {
+    case "loading":
+      return (
+        <Notice>
+          <span className="spinner" /> Loading the model — the first run of a session pays this
+          once, and it can take a minute. {seconds(run.elapsed_seconds)} so far.
+        </Notice>
+      );
+    case "running":
+    case "stopping":
+      return (
+        <Notice>
+          <span className="spinner" /> {run.state === "stopping" ? "Finishing the page in flight. " : ""}
+          Page {int(run.pages + 1)}
+          {run.max_pages != null ? ` of ${int(run.max_pages)}` : ""}, from message{" "}
+          {int(run.next_offset)} — {counts}. Coverage {pct(run.coverage_percent)}. You can leave
+          this view; the run keeps going.
+        </Notice>
+      );
+    case "done":
+      return (
+        <Notice tone="good">
+          Done: {counts}.{" "}
+          {run.coverage_percent >= 100
+            ? "The chat is fully assessed."
+            : `Resume at ${int(run.next_offset)}.`}
+        </Notice>
+      );
+    case "stopped":
+      return (
+        <Notice>
+          Stopped: {counts}. Resume at {int(run.next_offset)}.
+        </Notice>
+      );
+    case "failed":
+      return (
+        <Notice tone="error">
+          The run failed after {int(run.assessed)} messages: {run.error}. Resume at{" "}
+          {int(run.next_offset)}.
+        </Notice>
+      );
+    default:
+      return null;
+  }
+}
 
 type Group = "valence" | "bids" | "friction" | "discourse";
 
@@ -134,8 +197,7 @@ export function AssessmentView({
 }) {
   const [pageSize, setPageSize] = useState(25);
   const [offset, setOffset] = useState(0);
-  const [progress, setProgress] = useState<AssessmentProgress | null>(null);
-  const [running, setRunning] = useState(false);
+  const [run, setRun] = useState<AssessmentRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [group, setGroup] = useState<Group>("valence");
 
@@ -143,20 +205,77 @@ export function AssessmentView({
     () => (chatId == null ? null : api.assessment(chatId)),
     [chatId],
   );
+  const reloadAssessment = assessment.reload;
 
-  async function assessNextPage() {
-    if (chatId == null) return;
-    setRunning(true);
+  const active = run?.is_active ?? false;
+
+  // The run lives on the server, so picking a chat — or coming back to this
+  // view — picks up whatever that chat's run is doing.
+  useEffect(() => {
+    setRun(null);
     setError(null);
+    if (chatId == null) return;
+    let cancelled = false;
+    api.assessmentRun(chatId).then(
+      (status) => {
+        if (cancelled) return;
+        if (status.state === "idle") return;
+        setRun(status);
+        setOffset(status.next_offset);
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [chatId]);
+
+  // Poll while a run is going. The aggregate is re-read whenever a page lands,
+  // so the tables fill in as the run works rather than at the end.
+  const pagesSeen = useRef(0);
+  useEffect(() => {
+    if (chatId == null || !active) return;
+    let cancelled = false;
+    const tick = window.setInterval(() => {
+      api.assessmentRun(chatId).then(
+        (status) => {
+          if (cancelled) return;
+          setRun(status);
+          setOffset(status.next_offset);
+          if (status.pages !== pagesSeen.current || !status.is_active) {
+            pagesSeen.current = status.pages;
+            reloadAssessment();
+          }
+        },
+        (cause: unknown) => {
+          if (!cancelled) setError(cause instanceof ApiError ? cause.message : String(cause));
+        },
+      );
+    }, POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(tick);
+    };
+  }, [chatId, active, reloadAssessment]);
+
+  /** Starts a background run: one page, or until the chat is done. */
+  async function start(pages: number | null) {
+    if (chatId == null) return;
+    setError(null);
+    pagesSeen.current = 0;
     try {
-      const result = await api.assessPage(chatId, offset, pageSize);
-      setProgress(result);
-      setOffset(result.next_offset);
-      assessment.reload();
+      setRun(await api.startAssessmentRun(chatId, offset, pageSize, pages));
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : String(cause));
-    } finally {
-      setRunning(false);
+    }
+  }
+
+  async function stop() {
+    if (chatId == null) return;
+    try {
+      setRun(await api.stopAssessmentRun(chatId));
+    } catch (cause) {
+      setError(cause instanceof ApiError ? cause.message : String(cause));
     }
   }
 
@@ -200,7 +319,6 @@ export function AssessmentView({
             onChange={(id) => {
               onChatId(id);
               setOffset(0);
-              setProgress(null);
             }}
           />
         </Field>
@@ -209,6 +327,7 @@ export function AssessmentView({
             id="assessment-page"
             className="select"
             value={pageSize}
+            disabled={active}
             onChange={(event) => setPageSize(Number(event.target.value))}
           >
             {PAGE_SIZES.map((size) => (
@@ -225,38 +344,41 @@ export function AssessmentView({
             type="number"
             min={0}
             value={offset}
+            disabled={active}
             onChange={(event) => setOffset(Math.max(0, Number(event.target.value) || 0))}
           />
         </Field>
-        <button
-          className="btn btn--primary"
-          disabled={chatId == null || running}
-          onClick={() => void assessNextPage()}
-        >
-          {running && <span className="spinner" />}
-          Assess {pageSize} messages
-        </button>
+        {active ? (
+          <button
+            className="btn btn--primary"
+            disabled={run?.state === "stopping"}
+            onClick={() => void stop()}
+          >
+            <span className="spinner" />
+            {run?.state === "stopping" ? "Stopping after this page…" : "Stop"}
+          </button>
+        ) : (
+          <>
+            <button
+              className="btn btn--primary"
+              disabled={chatId == null}
+              onClick={() => void start(null)}
+            >
+              Assess to the end
+            </button>
+            <button
+              className="btn btn--ghost"
+              disabled={chatId == null}
+              onClick={() => void start(1)}
+            >
+              Assess {pageSize} messages
+            </button>
+          </>
+        )}
       </div>
 
       {error && <Notice tone="error">{error}</Notice>}
-
-      {running && (
-        <Notice>
-          Running the question set over {pageSize} messages. Every message that has not been
-          read yet costs a forward pass, so time a small page on this machine before committing
-          to a long run. The first call of a session also loads the checkpoints, which it pays
-          once.
-        </Notice>
-      )}
-
-      {progress && !running && (
-        <Notice tone="good">
-          Assessed {int(progress.assessed_now)}
-          {progress.skipped_already_done > 0 &&
-            `, skipped ${int(progress.skipped_already_done)} already done`}
-          . {progress.is_complete ? "The chat is fully assessed." : `Resume at ${int(progress.next_offset)}.`}
-        </Notice>
-      )}
+      {run && <RunNotice run={run} />}
 
       {assessment.error && <Notice tone="error">{assessment.error}</Notice>}
       {assessment.loading && (

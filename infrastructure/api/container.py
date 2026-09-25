@@ -13,6 +13,7 @@ from application.ports.decision_engine import IDecisionEngine
 from application.ports.export_reader import IExportReader
 from application.ports.text_normalizer import ITextNormalizer
 from application.services.analytics_service import AnalyticsService
+from application.services.assessment_runner import AssessmentRunner
 from application.services.assessment_service import AssessmentService
 from application.services.chat_service import ChatService
 from application.services.decision_service import DecisionService
@@ -68,6 +69,8 @@ class Container:
             preload=self.settings.preload_decision_engine,
             resident_checkpoints=self.settings.resident_checkpoints,
             custom_model_path=self.settings.decision_model_path,
+            custom_model_for_english=self.settings.custom_model_for_english,
+            batch_size=self.settings.decision_batch_size,
         )
         if self.settings.decision_cache_entries <= 0:
             return engine
@@ -133,6 +136,10 @@ class Container:
             engine=self.decision_engine,
             page_size=self.settings.assessment_page_size,
         )
+
+    @cached_property
+    def assessment_runner(self) -> AssessmentRunner:
+        return AssessmentRunner(self.assessment_service, self.decision_engine)
 
     @cached_property
     def decision_service(self) -> DecisionService:

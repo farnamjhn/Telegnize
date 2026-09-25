@@ -7,6 +7,12 @@
       "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "telegnize-api",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "python", "main.py"],
+      "port": 8000
     }
   ]
 }

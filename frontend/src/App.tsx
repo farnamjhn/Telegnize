@@ -17,11 +17,13 @@ export function ChatSelect({
   value,
   onChange,
   id = "chat-select",
+  disabled = false,
 }: {
   chats: Chat[];
   value: number | null;
   onChange: (id: number) => void;
   id?: string;
+  disabled?: boolean;
 }) {
   return (
     <select
@@ -29,7 +31,7 @@ export function ChatSelect({
       className="select"
       value={value ?? ""}
       onChange={(event) => onChange(Number(event.target.value))}
-      disabled={chats.length === 0}
+      disabled={disabled || chats.length === 0}
     >
       {chats.length === 0 && <option value="">No chats imported</option>}
       {chats.map((chat) => (

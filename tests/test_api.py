@@ -3,10 +3,12 @@ import unittest
 
 from fastapi.testclient import TestClient
 
+from application.services.assessment_runner import AssessmentRunner
 from application.services.assessment_service import AssessmentService
 from application.services.decision_service import DecisionService
 from infrastructure.api.app import create_app
 from infrastructure.api.dependencies import (
+    get_assessment_runner,
     get_assessment_service,
     get_decision_service,
 )
@@ -54,14 +56,17 @@ class APITestCase(unittest.TestCase):
             decision_repo=self.container.decision_repository,
             engine=self.engine,
         )
-        self.app.dependency_overrides[get_assessment_service] = (
-            lambda: AssessmentService(
-                chat_repo=self.container.chat_repository,
-                message_repo=self.container.message_repository,
-                decision_repo=self.container.decision_repository,
-                engine=self.engine,
-            )
+        assessment_service = AssessmentService(
+            chat_repo=self.container.chat_repository,
+            message_repo=self.container.message_repository,
+            decision_repo=self.container.decision_repository,
+            engine=self.engine,
         )
+        self.runner = AssessmentRunner(assessment_service, self.engine)
+        self.app.dependency_overrides[get_assessment_service] = (
+            lambda: assessment_service
+        )
+        self.app.dependency_overrides[get_assessment_runner] = lambda: self.runner
         self.client = TestClient(self.app)
 
     def tearDown(self):
@@ -274,6 +279,16 @@ class TestDecisionEndpoints(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(all(i["target_type"] == "chat" for i in response.json()))
 
+    def test_evaluating_the_whole_chat(self):
+        self.given_message()
+        response = self.client.post(
+            "/api/decisions/chats/1", json={"limit": 5, "whole_chat": True}
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body)
+        self.assertEqual(body[0]["engine_metadata"]["scope"], "whole_chat")
+
     def test_custom_questions(self):
         response = self.client.post(
             "/api/decisions/custom",
@@ -327,6 +342,31 @@ class TestAssessmentEndpoints(APITestCase):
         self.assertEqual(len(assessment["participants"]), 2)
         for field in ("positivity_ratio", "friction_percent", "avg_sarcasm_score"):
             self.assertIn(field, assessment["participants"][0])
+
+    def test_a_background_run_is_started_then_polled(self):
+        chat_id = self.given_chat()
+        started = self.client.post(
+            f"/api/assessments/{chat_id}/run", params={"limit": 1}
+        )
+        self.assertEqual(started.status_code, 200)
+        self.assertIn(started.json()["state"], {"loading", "running", "done"})
+
+        self.runner.wait(chat_id, 5.0)
+        status = self.client.get(f"/api/assessments/{chat_id}/run").json()
+        self.assertEqual(status["state"], "done")
+        self.assertEqual(status["assessed"], 2)
+        self.assertEqual(status["coverage_percent"], 100.0)
+        self.assertFalse(status["is_active"])
+
+    def test_a_run_for_an_unknown_chat_is_a_404(self):
+        self.assertEqual(
+            self.client.post("/api/assessments/9999/run").status_code, 404
+        )
+
+    def test_stopping_a_chat_with_no_run_reports_idle(self):
+        chat_id = self.given_chat()
+        body = self.client.delete(f"/api/assessments/{chat_id}/run").json()
+        self.assertEqual(body["state"], "idle")
 
     def test_paging_is_driven_by_the_returned_offset(self):
         chat_id = self.given_chat()

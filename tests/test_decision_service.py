@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from application.decision_questions import CONVERSATION_QUESTIONS, MESSAGE_QUESTIONS
 from application.ports.decision_engine import DecisionQuestion
@@ -126,9 +126,96 @@ class TestDecisionService(unittest.TestCase):
         )
         self.assertTrue(all(d.target_type is DecisionTarget.CHAT for d in decisions))
 
+    def given_chat(self, count: int) -> None:
+        self.messages.save_batch(
+            [
+                Message(
+                    id=0,
+                    telegram_msg_id=1000 + i,
+                    sender_id="u1" if i % 2 else "u2",
+                    sender_name="Alice" if i % 2 else "Bob",
+                    timestamp=datetime(2026, 5, 27, 10, 0, 0) + timedelta(minutes=i),
+                    text=f"line {i}",
+                )
+                for i in range(count)
+            ]
+        )
+
+    def test_the_recent_window_is_the_newest_messages(self):
+        self.given_chat(10)
+        self.service.evaluate_chat_window(1, limit=3)
+        state, _ = self.engine.calls[0]
+        self.assertEqual(
+            state["dialogue"], "Alice: line 7\nBob: line 8\nAlice: line 9"
+        )
+
+    def test_the_whole_chat_is_read_as_windows_in_one_batch(self):
+        self.given_chat(10)
+        decisions = self.service.evaluate_whole_chat(1, window_size=4)
+
+        self.assertEqual(len(self.engine.batch_calls), 1)
+        windows = self.engine.batch_calls[0][0]
+        self.assertEqual([w["turns_count"] for w in windows], [4, 4, 2])
+        self.assertTrue(windows[0]["dialogue"].startswith("Bob: line 0"))
+        self.assertTrue(windows[-1]["dialogue"].endswith("Alice: line 9"))
+
+        self.assertEqual(
+            {d.question_key for d in decisions},
+            {q.key for q in CONVERSATION_QUESTIONS},
+        )
+        self.assertTrue(all(d.target_type is DecisionTarget.CHAT for d in decisions))
+        self.assertEqual(
+            decisions[0].engine_metadata,
+            {
+                "scope": "whole_chat",
+                "windows": 3,
+                "window_size": 4,
+                "messages_read": 10,
+                "total_messages": 10,
+            },
+        )
+
+    def test_a_long_chat_is_sampled_from_first_window_to_last(self):
+        self.given_chat(100)
+        decisions = self.service.evaluate_whole_chat(1, window_size=5, max_windows=4)
+
+        windows = self.engine.batch_calls[0][0]
+        self.assertEqual(len(windows), 4)
+        self.assertTrue(windows[0]["dialogue"].startswith("Bob: line 0\n"))
+        self.assertTrue(windows[-1]["dialogue"].endswith("Alice: line 99"))
+        self.assertEqual(decisions[0].engine_metadata["messages_read"], 20)
+
+    def test_whole_chat_answers_are_the_weighted_average_of_the_windows(self):
+        from application.ports.decision_engine import EngineAnswer
+        from application.services.decision_service import _combine
+
+        question = CONVERSATION_QUESTIONS[1]  # overall_sentiment
+        answers = [
+            EngineAnswer(
+                question_key=question.key,
+                decision_type=question.decision_type,
+                value="positive",
+                probabilities={"positive": 0.6, "neutral": 0.3, "tense": 0.1},
+            ),
+            EngineAnswer(
+                question_key=question.key,
+                decision_type=question.decision_type,
+                value="tense",
+                probabilities={"positive": 0.0, "neutral": 0.2, "tense": 0.8},
+            ),
+        ]
+        # The tense window held three times the turns.
+        combined = _combine(question, answers, [1.0, 3.0])
+        self.assertEqual(combined.value, "tense")
+        self.assertEqual(combined.probabilities["positive"], 0.15)
+        self.assertEqual(combined.probabilities["tense"], 0.625)
+        self.assertEqual(combined.confidence, 0.625)
+
     def test_a_chat_with_nothing_to_read_raises(self):
         with self.assertRaises(ChatNotFoundError):
             self.service.evaluate_chat_window(1)
+        with self.assertRaises(ChatNotFoundError):
+            self.service.evaluate_whole_chat(1)
 
     def test_custom_evaluation_is_not_cached(self):
         questions = [

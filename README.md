@@ -317,6 +317,9 @@ Every setting is an environment variable prefixed `TELEGNIZE_`:
 | `TELEGNIZE_PRELOAD_DECISION_ENGINE` | `0` | `1` loads model weights at startup |
 | `TELEGNIZE_RESIDENT_CHECKPOINTS` | `2` | Checkpoints held in memory at once — below 2, a chat that mixes scripts rebuilds one per switch |
 | `TELEGNIZE_DECISION_CACHE_ENTRIES` | `10000` | Engine answers memoised, so repeated text is read once; `0` disables |
+| `TELEGNIZE_DECISION_BATCH_SIZE` | `32` | Most messages packed into one engine forward pass |
+| `TELEGNIZE_DECISION_MODEL_PATH` | `checkpoints/laya-multilingual-telegnize` if present | Fine-tuned checkpoint that replaces the multilingual one; empty disables |
+| `TELEGNIZE_CUSTOM_MODEL_FOR_ENGLISH` | `0` | `1` sends English text to the fine-tune too, instead of the faster stock English checkpoint |
 
 ## Tests
 

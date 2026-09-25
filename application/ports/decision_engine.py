@@ -99,6 +99,22 @@ class IDecisionEngine(ABC):
             DecisionEngineError: if the underlying model fails.
         """
 
+    def predict_batch(
+        self,
+        states: Sequence[Any],
+        questions: Sequence[DecisionQuestion],
+    ) -> list[EngineResult]:
+        """Answers the same question set about each of ``states``, in order.
+
+        An engine that can share forward passes between states should override
+        this; the default asks about each state in turn, which is correct but
+        no faster than calling :meth:`predict` in a loop.
+
+        Raises:
+            DecisionEngineError: if the underlying model fails.
+        """
+        return [self.predict(state, questions) for state in states]
+
     @property
     @abstractmethod
     def is_ready(self) -> bool:

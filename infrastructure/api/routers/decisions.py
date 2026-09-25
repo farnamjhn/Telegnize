@@ -31,7 +31,17 @@ class QuestionOverride(BaseModel):
 
 
 class EvaluateDialogueRequest(QuestionOverride):
-    limit: int = Field(DEFAULT_WINDOW_SIZE, ge=1, le=200)
+    limit: int = Field(
+        DEFAULT_WINDOW_SIZE,
+        ge=1,
+        le=200,
+        description="Messages in the window; with whole_chat, in each window.",
+    )
+    whole_chat: bool = Field(
+        False,
+        description="Read windows sampled across the whole chat and combine "
+        "them, instead of only the most recent window.",
+    )
 
 
 class CustomDecisionRequest(BaseModel):
@@ -67,7 +77,7 @@ def get_cached_message_decisions(
 @router.post(
     "/chats/{chat_id}",
     response_model=list[DecisionDTO],
-    summary="Evaluate a chat's recent conversation window",
+    summary="Evaluate a chat's recent window, or the whole chat",
 )
 def evaluate_chat_dialogue(
     chat_id: int,
@@ -75,6 +85,10 @@ def evaluate_chat_dialogue(
     payload: EvaluateDialogueRequest | None = None,
 ) -> list[DecisionDTO]:
     questions = questions_from_payload(payload.questions if payload else None)
+    if payload is not None and payload.whole_chat:
+        return decision_service.evaluate_whole_chat(
+            chat_id, window_size=payload.limit, questions=questions
+        )
     return decision_service.evaluate_chat_window(
         chat_id,
         limit=payload.limit if payload else DEFAULT_WINDOW_SIZE,

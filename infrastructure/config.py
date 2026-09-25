@@ -140,3 +140,14 @@ class Settings:
     decision_model_path: str | None = field(
         default_factory=_default_decision_model_path
     )
+    #: Whether the fine-tuned checkpoint also reads text Laya is sure is
+    #: English. Off by default: the fine-tune is a multilingual encoder, the
+    #: slower of the two, and the stock English checkpoint reads English fine.
+    #: Turn it on if the fine-tune measurably does better on this chat's English.
+    custom_model_for_english: bool = field(
+        default_factory=lambda: _env("CUSTOM_MODEL_FOR_ENGLISH", "0") == "1"
+    )
+    #: Most messages the decision engine packs into one forward pass.
+    decision_batch_size: int = field(
+        default_factory=lambda: _env_int("DECISION_BATCH_SIZE", 32)
+    )

@@ -108,6 +108,13 @@ class TestLayaDecisionEngine(unittest.TestCase):
             self.engine.predict("anything", [])
 
 
+GREETING = DecisionQuestion(
+    key="is_greeting",
+    decision_type=DecisionType.NOUL,
+    instructions="Is this a greeting?",
+)
+
+
 class StubRouter:
     """Stands in for ``laya.Router``, recording how it was built."""
 
@@ -117,8 +124,23 @@ class StubRouter:
         self.kwargs = kwargs
         StubRouter.built.append(self)
 
-    def predict(self, state, questions):
+    def predict(self, state, questions, **overrides):
+        self.predicted = overrides
         return {"answers": {}, "routing": {"model": "stub"}}
+
+    def predict_batch(self, requests, batch_size=None):
+        self.requests = list(requests)
+        self.batch_size = batch_size
+        return [
+            {
+                "answers": {
+                    key: {"type": "noul", "noul": 0.8, "confidence": 0.8}
+                    for key in request["questions"]
+                },
+                "routing": {"model": "stub", "index": index},
+            }
+            for index, request in enumerate(requests)
+        ]
 
 
 class TestRouterConfiguration(unittest.TestCase):
@@ -168,6 +190,48 @@ class TestRouterConfiguration(unittest.TestCase):
         engine = LayaDecisionEngine(preload=True)
         self.assertTrue(StubRouter.built[-1].kwargs["preload"])
         self.assertTrue(engine.is_ready)
+
+    def test_a_batch_is_one_router_call_in_order(self):
+        engine = LayaDecisionEngine(batch_size=7)
+        results = engine.predict_batch(["a", "b", "c"], [GREETING])
+        router = StubRouter.built[-1]
+
+        self.assertEqual([r["state"] for r in router.requests], ["a", "b", "c"])
+        self.assertEqual(router.batch_size, 7)
+        self.assertEqual([r.metadata["index"] for r in results], [0, 1, 2])
+        self.assertIs(results[0].answers["is_greeting"].value, True)
+
+    def test_an_empty_batch_loads_nothing(self):
+        self.assertEqual(LayaDecisionEngine().predict_batch([], [GREETING]), [])
+        self.assertEqual(StubRouter.built, [])
+
+    def test_without_a_fine_tune_the_stock_checkpoints_are_used(self):
+        router = self.ask(LayaDecisionEngine())
+        self.assertIsNone(router.kwargs["models"])
+        self.assertEqual(router.kwargs["default"], "english")
+
+    def test_a_fine_tune_replaces_only_the_multilingual_checkpoint(self):
+        engine = LayaDecisionEngine(custom_model_path="ckpt")
+        router = self.ask(engine)
+        self.assertEqual(router.kwargs["models"], {"multilingual": "ckpt"})
+        # Text Laya cannot place goes to the fine-tune.
+        self.assertEqual(router.kwargs["default"], "multilingual")
+        self.assertEqual(router.predicted, {})
+
+        engine.predict_batch(["a"], [GREETING])
+        self.assertNotIn("model", router.requests[0])
+
+    def test_a_fine_tune_for_english_pins_every_request_to_it(self):
+        engine = LayaDecisionEngine(
+            custom_model_path="ckpt", custom_model_for_english=True
+        )
+        router = self.ask(engine)
+        # One route name for the fine-tune, so its weights load once.
+        self.assertEqual(router.kwargs["models"], {"multilingual": "ckpt"})
+        self.assertEqual(router.predicted, {"model": "multilingual"})
+
+        engine.predict_batch(["a"], [GREETING])
+        self.assertEqual(router.requests[0]["model"], "multilingual")
 
     def test_the_router_is_built_once_and_reused(self):
         engine = LayaDecisionEngine()

@@ -37,6 +37,10 @@ NOUL_THRESHOLD = 0.5
 #: an explicit request, which this adapter never makes.
 RESIDENT_CHECKPOINTS = 2
 
+#: Most states Laya packs into one forward pass. A page larger than this is
+#: still one call here; Laya splits it into passes of at most this many.
+BATCH_SIZE = 32
+
 # Where each answer type carries its value in Laya's response.
 _VALUE_KEYS: dict[DecisionType, str] = {
     DecisionType.CHOICE: "choice",
@@ -61,10 +65,14 @@ class LayaDecisionEngine(IDecisionEngine):
         preload: bool = False,
         resident_checkpoints: int = RESIDENT_CHECKPOINTS,
         custom_model_path: str | None = None,
+        custom_model_for_english: bool = False,
+        batch_size: int = BATCH_SIZE,
     ) -> None:
         self._preload = preload
         self._resident_checkpoints = max(1, resident_checkpoints)
         self._custom_model_path = custom_model_path
+        self._custom_model_for_english = custom_model_for_english
+        self._batch_size = max(1, batch_size)
         self._router: Any | None = None
         self._lock = threading.Lock()
         if preload:
@@ -78,22 +86,14 @@ class LayaDecisionEngine(IDecisionEngine):
                     from laya import Router  # imported late: heavy, optional
 
                     logger.info(
-                        "Loading Laya router (preload=%s, resident=%d, custom=%s).",
+                        "Loading Laya router (preload=%s, resident=%d, custom=%s, "
+                        "custom for English=%s).",
                         self._preload,
                         self._resident_checkpoints,
                         self._custom_model_path,
+                        self._custom_model_for_english,
                     )
-                    models = (
-                        {
-                            "multilingual": self._custom_model_path,
-                            "english": self._custom_model_path,
-                        }
-                        if self._custom_model_path
-                        else None
-                    )
-                    default_model = (
-                        "multilingual" if self._custom_model_path else "english"
-                    )
+                    models, default_model = self._routes()
                     self._router = Router(
                         models=models,
                         default=default_model,
@@ -101,6 +101,31 @@ class LayaDecisionEngine(IDecisionEngine):
                         max_loaded=self._resident_checkpoints,
                     )
         return self._router
+
+    def _routes(self) -> tuple[dict[str, str] | None, str]:
+        """Which checkpoint each route reads, and where undecided text goes.
+
+        A fine-tuned checkpoint replaces the multilingual one. It is a
+        multilingual encoder, which is the slower of the two, so text Laya is
+        sure is English stays on the stock English checkpoint unless
+        ``custom_model_for_english`` says the fine-tune should read it too.
+        Text Laya cannot place (too short, emoji only) goes to the fine-tune
+        either way: it is what was tuned on this chat.
+        """
+        if not self._custom_model_path:
+            return None, "english"
+        return {"multilingual": self._custom_model_path}, "multilingual"
+
+    def _pinned_route(self) -> dict[str, str]:
+        """Request fields that pin every state to the fine-tune, when asked to.
+
+        Pinning rather than pointing both routes at the same path: the router
+        keys checkpoints by route name, so two names for one path would load
+        the same weights twice.
+        """
+        if self._custom_model_path and self._custom_model_for_english:
+            return {"model": "multilingual"}
+        return {}
 
     @property
     def is_ready(self) -> bool:
@@ -125,7 +150,9 @@ class LayaDecisionEngine(IDecisionEngine):
         expected = {q.key: q.decision_type for q in questions}
 
         try:
-            raw = self._ensure_router().predict(state=state, questions=schema)
+            raw = self._ensure_router().predict(
+                state=state, questions=schema, **self._pinned_route()
+            )
         except Exception as error:  # laya raises a variety of library errors
             logger.exception("Laya prediction failed.")
             raise DecisionEngineError(str(error)) from error
@@ -134,6 +161,47 @@ class LayaDecisionEngine(IDecisionEngine):
             answers=_to_answers(raw.get("answers", {}), expected),
             metadata=dict(raw.get("routing", {})),
         )
+
+
+    def predict_batch(
+        self,
+        states: Sequence[Any],
+        questions: Sequence[DecisionQuestion],
+    ) -> list[EngineResult]:
+        """Answers one question set about many states in shared forward passes.
+
+        Laya routes each state on its own and groups them by checkpoint, so a
+        page that mixes scripts still loads each checkpoint at most once.
+        """
+        if not questions:
+            raise DecisionEngineError("At least one question is required.")
+        if not states:
+            return []
+
+        schema = {q.key: _to_laya_schema(q) for q in questions}
+        expected = {q.key: q.decision_type for q in questions}
+
+        try:
+            pinned = self._pinned_route()
+            raw_results = self._ensure_router().predict_batch(
+                [{"state": state, "questions": schema, **pinned} for state in states],
+                batch_size=self._batch_size,
+            )
+        except Exception as error:  # laya raises a variety of library errors
+            logger.exception("Laya batch prediction failed.")
+            raise DecisionEngineError(str(error)) from error
+
+        if len(raw_results) != len(states):
+            raise DecisionEngineError(
+                f"Laya returned {len(raw_results)} results for {len(states)} states."
+            )
+        return [
+            EngineResult(
+                answers=_to_answers(raw.get("answers", {}), expected),
+                metadata=dict(raw.get("routing", {})),
+            )
+            for raw in raw_results
+        ]
 
 
 def _to_laya_schema(question: DecisionQuestion) -> dict[str, Any]:

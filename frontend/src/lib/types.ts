@@ -251,6 +251,7 @@ export interface Decision {
   result_value: unknown;
   confidence: number;
   probabilities: Record<string, number>;
+  engine_metadata?: Record<string, unknown>;
   created_at: string | null;
 }
 
@@ -303,6 +304,33 @@ export interface RelationalAssessment {
 
 /** What one paged assessment call got through. The pass is resumable: call
  *  again with `next_offset` until `is_complete`. */
+export type AssessmentRunState =
+  | "idle"
+  | "loading"
+  | "running"
+  | "stopping"
+  | "done"
+  | "stopped"
+  | "failed";
+
+export interface AssessmentRun {
+  chat_id: number;
+  state: AssessmentRunState;
+  is_active: boolean;
+  page_size: number;
+  max_pages: number | null;
+  started_offset: number;
+  next_offset: number;
+  pages: number;
+  assessed: number;
+  skipped: number;
+  coverage_percent: number;
+  elapsed_seconds: number;
+  last_page_seconds: number | null;
+  seconds_per_message: number | null;
+  error: string | null;
+}
+
 export interface AssessmentProgress {
   chat_id: number;
   assessed_now: number;

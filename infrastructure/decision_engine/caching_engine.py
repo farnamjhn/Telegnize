@@ -91,6 +91,63 @@ class CachingDecisionEngine(IDecisionEngine):
                     self._entries.popitem(last=False)
         return result
 
+    def predict_batch(
+        self,
+        states: Sequence[Any],
+        questions: Sequence[DecisionQuestion],
+    ) -> list[EngineResult]:
+        """Answers what it can from the cache and sends the rest as one batch.
+
+        A state that repeats inside the batch goes to the engine once, which is
+        where most of a page's repeats are: a short reply sent several times in
+        a row.
+        """
+        results: list[EngineResult | None] = [None] * len(states)
+        # Cache key -> positions in ``states`` waiting on that answer.
+        waiting: dict[str, list[int]] = {}
+        uncacheable: list[int] = []
+
+        with self._lock:
+            for position, state in enumerate(states):
+                key = _cache_key(state, questions)
+                if key is None:
+                    uncacheable.append(position)
+                    continue
+                cached = self._entries.get(key)
+                if cached is not None:
+                    self._entries.move_to_end(key)
+                    self.hits += 1
+                    results[position] = _detached(cached)
+                elif key in waiting:
+                    # Answered by the engine call below, so as good as a hit.
+                    self.hits += 1
+                    waiting[key].append(position)
+                else:
+                    waiting[key] = [position]
+
+        # One representative state per distinct key, then the uncacheable ones.
+        asked = [positions[0] for positions in waiting.values()] + uncacheable
+        if asked:
+            # Outside the lock, for the same reason as in ``predict``.
+            answered = self._inner.predict_batch(
+                [states[position] for position in asked], questions
+            )
+            by_position = dict(zip(asked, answered, strict=True))
+            with self._lock:
+                for key, positions in waiting.items():
+                    result = by_position[positions[0]]
+                    self.misses += 1
+                    self._entries[key] = _detached(result)
+                    self._entries.move_to_end(key)
+                    for position in positions:
+                        results[position] = _detached(result)
+                while len(self._entries) > self._max_entries:
+                    self._entries.popitem(last=False)
+            for position in uncacheable:
+                results[position] = by_position[position]
+
+        return [result for result in results if result is not None]
+
 
 def _detached(result: EngineResult) -> EngineResult:
     """A copy, so that what one caller does to its result stays with it.
