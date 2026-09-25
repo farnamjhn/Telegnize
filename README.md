@@ -137,7 +137,7 @@ the text, so that needs a fresh import.
 
 [![uv](https://img.shields.io/badge/uv-DE5FE9?style=flat-square&logo=uv&logoColor=white)](https://docs.astral.sh/uv/)
 [![Ruff](https://img.shields.io/badge/Ruff-D7FF64?style=flat-square&logo=ruff&logoColor=black)](https://docs.astral.sh/ruff/)
-[![unittest](https://img.shields.io/badge/unittest-201%20tests-4c1?style=flat-square)](tests/)
+[![unittest](https://img.shields.io/badge/unittest-231%20tests-4c1?style=flat-square)](tests/)
 
 | Choice | Why |
 | --- | --- |
@@ -179,6 +179,12 @@ was counted, **Assessment** for what a model read. The participant tables in
 both follow that document's groups, each carrying its caveat, and the
 assessment pass is driven one page at a time from the UI so a run is always a
 deliberate choice rather than something a button starts by accident.
+
+Every figure carries its own definition inline — an info icon next to a stat
+or column header opens a popover with its formula, interpretation, and
+caveats, and each group of metrics can expand into a full field guide below
+it. A "Field Guides" toggle expands every guide on the page at once, for
+reading them end to end.
 
 ```bash
 npm --prefix frontend run dev        # http://localhost:3000
