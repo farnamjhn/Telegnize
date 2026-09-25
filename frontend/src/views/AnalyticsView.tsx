@@ -20,6 +20,7 @@ import {
   type TrendSeries,
   foldToSlices,
 } from "../components/charts";
+import { ExportModal, PrintHeader, triggerPdfExport } from "../components/ExportModal";
 import { api } from "../lib/api";
 import {
   compact,
@@ -739,119 +740,6 @@ function Plot({
   );
 }
 
-/* ----------------------------------------------------------- export modal */
-
-function ExportModal({
-  chatName,
-  totalMessages,
-  isOpen,
-  onClose,
-  onExport,
-}: {
-  chatName: string;
-  totalMessages: number;
-  isOpen: boolean;
-  onClose: () => void;
-  onExport: (options: { theme: "light" | "dark" }) => void;
-}) {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="modal-backdrop" onClick={onClose} role="presentation">
-      <div
-        className="modal-dialog"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="export-modal-title"
-      >
-        <header className="modal-head">
-          <div>
-            <h2 id="export-modal-title" className="modal-title">
-              Export Analytics to PDF
-            </h2>
-            <p className="faint" style={{ fontSize: 12, marginTop: 2 }}>
-              {chatName} · {int(totalMessages)} messages
-            </p>
-          </div>
-          <button
-            type="button"
-            className="btn btn--ghost btn--sm"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            ✕
-          </button>
-        </header>
-
-        <div className="modal-body">
-          <div>
-            <div className="modal-section-title">Color Theme</div>
-            <div className="option-group">
-              <label
-                className={`option-card ${theme === "light" ? "is-selected" : ""}`}
-                onClick={() => setTheme("light")}
-              >
-                <input
-                  type="radio"
-                  name="export-theme"
-                  className="option-radio"
-                  checked={theme === "light"}
-                  onChange={() => setTheme("light")}
-                />
-                <div className="option-content">
-                  <span className="option-label">Print-Friendly Light (Recommended)</span>
-                  <span className="option-hint">
-                    Crisp white paper layout with dark ink; saves printer toner and reads like a printed dossier.
-                  </span>
-                </div>
-              </label>
-
-              <label
-                className={`option-card ${theme === "dark" ? "is-selected" : ""}`}
-                onClick={() => setTheme("dark")}
-              >
-                <input
-                  type="radio"
-                  name="export-theme"
-                  className="option-radio"
-                  checked={theme === "dark"}
-                  onChange={() => setTheme("dark")}
-                />
-                <div className="option-content">
-                  <span className="option-label">AMOLED Dark</span>
-                  <span className="option-hint">
-                    Preserves the signature AMOLED dark theme in the exported PDF.
-                  </span>
-                </div>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <footer className="modal-foot">
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={() => {
-              onExport({ theme });
-              onClose();
-            }}
-          >
-            <Icon name="pdf" size={15} />
-            Export PDF
-          </button>
-        </footer>
-      </div>
-    </div>
-  );
-}
-
 /* ------------------------------------------------------------------ view */
 
 export function AnalyticsView({
@@ -872,25 +760,8 @@ export function AnalyticsView({
 
   function handleTriggerExport(options: { theme: "light" | "dark" }) {
     if (!data) return;
-
-    const previousTitle = document.title;
     const safeChatName = data.chat_name.replace(/[/\\?%*:|"<>]/g, "-").trim() || "Chat";
-    document.title = `${safeChatName} - Telegnize Analytics`;
-
-    document.body.setAttribute("data-print-theme", options.theme);
-
-    const cleanup = () => {
-      document.title = previousTitle;
-      document.body.removeAttribute("data-print-theme");
-      window.removeEventListener("afterprint", cleanup);
-    };
-
-    window.addEventListener("afterprint", cleanup);
-
-    setTimeout(() => {
-      window.print();
-      setTimeout(cleanup, 2000);
-    }, 120);
+    triggerPdfExport({ theme: options.theme, documentTitle: `${safeChatName} - Telegnize Analytics` });
   }
 
   if (chats.length === 0) {
@@ -928,8 +799,8 @@ export function AnalyticsView({
   return (
     <div className="view">
       <ExportModal
-        chatName={data?.chat_name ?? "Chat"}
-        totalMessages={data?.total_messages ?? 0}
+        title="Export Analytics to PDF"
+        subtitle={`${data?.chat_name ?? "Chat"} · ${int(data?.total_messages ?? 0)} messages`}
         isOpen={exportModalOpen}
         onClose={() => setExportModalOpen(false)}
         onExport={handleTriggerExport}
@@ -987,43 +858,11 @@ export function AnalyticsView({
             </Card>
           ) : (
             <>
-              <div className="print-header print-only">
-                <div className="print-header-top">
-                  <div className="print-brand">
-                    <svg className="print-brand-mark" viewBox="0 0 28 28" fill="none" aria-hidden="true">
-                      <rect
-                        x="0.75"
-                        y="0.75"
-                        width="26.5"
-                        height="26.5"
-                        rx="8"
-                        stroke="currentColor"
-                        strokeOpacity="0.25"
-                      />
-                      <path
-                        d="M8 18.5V13M14 18.5V8.5M20 18.5v-3.2"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                    <span className="print-brand-name">TELEGNIZE</span>
-                    <span className="print-brand-tag">Analytics Dossier</span>
-                  </div>
-                  <div className="print-meta-right">
-                    Generated on{" "}
-                    {new Date().toLocaleDateString("en-US", {
-                      year: "numeric",
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </div>
-                </div>
-                <div className="print-title-area">
-                  <h1 className="print-chat-title">{data.chat_name}</h1>
-                  <div className="print-chat-sub">
+              <PrintHeader
+                tag="Analytics Dossier"
+                title={data.chat_name}
+                subLine={
+                  <>
                     <span>{compact(data.total_messages)} messages</span>
                     {data.date_range_start && data.date_range_end && (
                       <>
@@ -1036,9 +875,9 @@ export function AnalyticsView({
                     )}
                     <span className="print-sep">·</span>
                     <span>{participants.map((p) => p.sender_name).join(", ")}</span>
-                  </div>
-                </div>
-              </div>
+                  </>
+                }
+              />
               <div className="grid grid--hero">
                 <Card fill>
                   <Hero

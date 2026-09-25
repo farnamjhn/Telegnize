@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ChatSelect } from "../App";
-import { Card, Empty, Field, Hero, Notice, Spinner } from "../components/Primitives";
+import { Card, Empty, Field, Hero, Icon, Notice, Spinner } from "../components/Primitives";
 import { ShareStrip, type Slice } from "../components/charts";
+import { ExportModal, PrintHeader, triggerPdfExport } from "../components/ExportModal";
 import { ApiError, api } from "../lib/api";
 import { compact, int, pct, pctOrDash, rate } from "../lib/format";
 import type { AssessmentRun, Chat, ParticipantAssessment } from "../lib/types";
@@ -199,6 +200,7 @@ export function AssessmentView({
   const [offset, setOffset] = useState(0);
   const [run, setRun] = useState<AssessmentRun | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
 
   const assessment = useAsync(
     () => (chatId == null ? null : api.assessment(chatId)),
@@ -302,9 +304,24 @@ export function AssessmentView({
   const data = assessment.data;
   const participants = data?.participants ?? [];
   const started = (data?.assessed_messages ?? 0) > 0;
+  const chatName = chats.find((c) => c.id === chatId)?.name ?? "Chat";
+
+  function handleTriggerExport(options: { theme: "light" | "dark" }) {
+    if (!data) return;
+    const safeChatName = chatName.replace(/[/\\?%*:|"<>]/g, "-").trim() || "Chat";
+    triggerPdfExport({ theme: options.theme, documentTitle: `${safeChatName} - Telegnize Assessment` });
+  }
 
   return (
     <div className="view">
+      <ExportModal
+        title="Export Assessment to PDF"
+        subtitle={`${chatName} · ${int(data?.assessed_messages ?? 0)} messages read`}
+        isOpen={exportModalOpen}
+        onClose={() => setExportModalOpen(false)}
+        onExport={handleTriggerExport}
+      />
+
       <header className="view-head">
         <div>
           <h1 className="view-title">Assessment</h1>
@@ -381,6 +398,17 @@ export function AssessmentView({
             </button>
           </>
         )}
+        <button
+          type="button"
+          className="btn"
+          onClick={() => setExportModalOpen(true)}
+          disabled={!started}
+          title="Export the assessment report to PDF"
+          style={{ marginInlineStart: "auto" }}
+        >
+          <Icon name="pdf" size={15} />
+          Export to PDF
+        </button>
       </div>
 
       {error && <Notice tone="error">{error}</Notice>}
@@ -395,6 +423,19 @@ export function AssessmentView({
 
       {data && (
         <div className={assessment.refetching ? "stack-v is-refetching" : "stack-v"}>
+          <PrintHeader
+            tag="Assessment Report"
+            title={chatName}
+            subLine={
+              <>
+                <span>{compact(data.assessed_messages)} of {compact(data.total_messages)} messages read</span>
+                <span className="print-sep">·</span>
+                <span>{pct(data.coverage_percent)} coverage</span>
+                <span className="print-sep">·</span>
+                <span>{participants.map((p) => p.sender_name).join(", ")}</span>
+              </>
+            }
+          />
           <div className="grid grid--hero">
             <Card fill>
               <Hero

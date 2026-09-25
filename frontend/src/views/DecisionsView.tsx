@@ -1,8 +1,9 @@
 import { useState } from "react";
 
 import { ChatSelect } from "../App";
-import { Badge, Card, Empty, Field, Notice } from "../components/Primitives";
+import { Badge, Card, Empty, Field, Icon, Notice } from "../components/Primitives";
 import { ProbabilityBars } from "../components/charts";
+import { ExportModal, PrintHeader, triggerPdfExport } from "../components/ExportModal";
 import { ApiError, api } from "../lib/api";
 import { dateTime, decisionValue, directionOf, humanize } from "../lib/format";
 import type { Chat, Decision } from "../lib/types";
@@ -100,6 +101,7 @@ export function DecisionsView({
   const [busy, setBusy] = useState<"run" | "cache" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [empty, setEmpty] = useState<string | null>(null);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
 
   const preview = useAsync(
     () => (mode === "message" && messageTarget != null ? api.getMessage(messageTarget) : null),
@@ -151,8 +153,30 @@ export function DecisionsView({
     );
   }
 
+  const chatName = chats.find((c) => c.id === chatId)?.name ?? "Chat";
+  const targetLabel =
+    mode === "chat"
+      ? chatName
+      : preview.data
+        ? `${preview.data.sender_name} · ${dateTime(preview.data.timestamp)}`
+        : `Message ${messageTarget ?? ""}`;
+
+  function handleTriggerExport(options: { theme: "light" | "dark" }) {
+    if (!decisions || decisions.length === 0) return;
+    const safeTarget = targetLabel.replace(/[/\\?%*:|"<>]/g, "-").trim() || "Decisions";
+    triggerPdfExport({ theme: options.theme, documentTitle: `${safeTarget} - Telegnize Decisions` });
+  }
+
   return (
     <div className="view">
+      <ExportModal
+        title="Export Decisions to PDF"
+        subtitle={`${targetLabel} · ${decisions?.length ?? 0} decision${decisions?.length === 1 ? "" : "s"}`}
+        isOpen={exportModalOpen}
+        onClose={() => setExportModalOpen(false)}
+        onExport={handleTriggerExport}
+      />
+
       <header className="view-head">
         <div>
           <h1 className="view-title">Decisions</h1>
@@ -255,6 +279,18 @@ export function DecisionsView({
             Load cached
           </button>
         </div>
+
+        <button
+          type="button"
+          className="btn"
+          onClick={() => setExportModalOpen(true)}
+          disabled={!decisions || decisions.length === 0}
+          title="Export these decisions to PDF"
+          style={{ marginInlineStart: "auto" }}
+        >
+          <Icon name="pdf" size={15} />
+          Export to PDF
+        </button>
       </div>
 
       {mode === "message" && preview.data && (
@@ -276,11 +312,18 @@ export function DecisionsView({
       {empty && <Notice>{empty}</Notice>}
 
       {decisions && decisions.length > 0 ? (
-        <div className="grid grid--2">
-          {decisions.map((decision) => (
-            <DecisionCard key={`${decision.target_type}-${decision.target_id}-${decision.question_key}`} decision={decision} />
-          ))}
-        </div>
+        <>
+          <PrintHeader
+            tag="Decisions Report"
+            title={targetLabel}
+            subLine={<span>{decisions.length} decision{decisions.length === 1 ? "" : "s"}</span>}
+          />
+          <div className="grid grid--2">
+            {decisions.map((decision) => (
+              <DecisionCard key={`${decision.target_type}-${decision.target_id}-${decision.question_key}`} decision={decision} />
+            ))}
+          </div>
+        </>
       ) : (
         !error &&
         !empty &&
