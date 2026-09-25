@@ -21,7 +21,9 @@ import {
   foldToSlices,
 } from "../components/charts";
 import { ExportModal, PrintHeader, triggerPdfExport } from "../components/ExportModal";
+import { InfoSection, InfoTrigger } from "../components/InfoSection";
 import { api } from "../lib/api";
+import { ANALYTICS_FIELDS, findFieldDefinition, type FieldDefinition } from "../lib/fieldDescriptions";
 import {
   compact,
   dateOnly,
@@ -457,10 +459,12 @@ function Participants({
   participants,
   chatId,
   onRederived,
+  expandAllGuides,
 }: {
   participants: ParticipantStats[];
   chatId: number;
   onRederived: () => void;
+  expandAllGuides?: boolean;
 }) {
   const [rederiving, setRederiving] = useState(false);
   const [rederiveError, setRederiveError] = useState<string | null>(null);
@@ -479,11 +483,12 @@ function Participants({
   }
 
   return (
-    <div style={{ display: "grid", gap: 16 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 16 }}>
       {rederiveError && <Notice tone="error">{rederiveError}</Notice>}
       {GROUPS.map((g) => {
         const columns = COLUMNS[g.value];
         const missing = markersMissing(g.value, participants);
+        const groupFields = ANALYTICS_FIELDS[g.value];
         return (
           <Card key={g.value} title={`Participants · ${g.label}`} subtitle={GROUP_NOTE[g.value]} flush>
             {missing && (
@@ -516,11 +521,17 @@ function Participants({
                 <thead>
                   <tr>
                     <th>Participant</th>
-                    {columns.map((column) => (
-                      <th key={column.key} className="num" title={column.hint}>
-                        {column.label}
-                      </th>
-                    ))}
+                    {columns.map((column) => {
+                      const fieldDef = findFieldDefinition(g.value, column.key);
+                      return (
+                        <th key={column.key} className="num" title={column.hint}>
+                          <span className="th-label">
+                            <span>{column.label}</span>
+                            {fieldDef && <InfoTrigger field={fieldDef} />}
+                          </span>
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody>
@@ -548,6 +559,15 @@ function Participants({
                 </tbody>
               </table>
             </div>
+            {groupFields && (
+              <div style={{ padding: "0 var(--pad-card) 16px" }}>
+                <InfoSection
+                  fields={groupFields}
+                  title={`${g.label} · Field definitions & interpretation guide`}
+                  forceOpen={expandAllGuides}
+                />
+              </div>
+            )}
           </Card>
         );
       })}
@@ -559,7 +579,13 @@ function Participants({
 
 const TREND_COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)"];
 
-function LatencyTrend({ participants }: { participants: ParticipantStats[] }) {
+function LatencyTrend({
+  participants,
+  expandAllGuides,
+}: {
+  participants: ParticipantStats[];
+  expandAllGuides?: boolean;
+}) {
   // Past three participants the lines stop being tellable apart, so the chart
   // steps aside for the table, which carries every median anyway.
   const series: TrendSeries[] = participants
@@ -589,6 +615,7 @@ function LatencyTrend({ participants }: { participants: ParticipantStats[] }) {
           Showing the {TREND_COLORS.length} most active participants. The table has the rest.
         </p>
       )}
+      <InfoSection fields={ANALYTICS_FIELDS.latency_trend} forceOpen={expandAllGuides} />
     </Card>
   );
 }
@@ -600,7 +627,13 @@ function LatencyTrend({ participants }: { participants: ParticipantStats[] }) {
  *  The chat-wide chart above averages everyone together, which describes
  *  nobody when two people keep different hours: opposite schedules produce a
  *  flat curve that looks like neither of them has one. */
-function BodyClock({ participants }: { participants: ParticipantStats[] }) {
+function BodyClock({
+  participants,
+  expandAllGuides,
+}: {
+  participants: ParticipantStats[];
+  expandAllGuides?: boolean;
+}) {
   // The circadian check is for the moment after a deploy when the page has
   // reloaded and the API has not: one missing group should not blank the view.
   if (participants.length < 2 || !participants[0].circadian) return null;
@@ -632,13 +665,20 @@ function BodyClock({ participants }: { participants: ParticipantStats[] }) {
           );
         })}
       </div>
+      <InfoSection fields={ANALYTICS_FIELDS.body_clock} forceOpen={expandAllGuides} />
     </Card>
   );
 }
 
 /* --------------------------------------------------------- style matching */
 
-function StyleMatchingCard({ matching }: { matching: StyleMatching }) {
+function StyleMatchingCard({
+  matching,
+  expandAllGuides,
+}: {
+  matching: StyleMatching;
+  expandAllGuides?: boolean;
+}) {
   if (matching.lsm_percent == null) return null;
 
   const categories = Object.entries(matching.by_category).sort((a, b) => b[1] - a[1]);
@@ -651,7 +691,12 @@ function StyleMatchingCard({ matching }: { matching: StyleMatching }) {
       <div className="grid grid--hero" style={{ marginBottom: 18 }}>
         <Card fill>
           <Hero
-            label="Linguistic style matching"
+            label={
+              <span className="th-label">
+                <span>Linguistic style matching</span>
+                <InfoTrigger field={findFieldDefinition("style_matching", "lsm_percent")} />
+              </span>
+            }
             value={pct(matching.lsm_percent)}
             note={`across ${compact(matching.turn_pairs)} adjacent turn pairs`}
           />
@@ -672,17 +717,39 @@ function StyleMatchingCard({ matching }: { matching: StyleMatching }) {
           <BalanceMeter key={name} label={humanize(name)} value={value} />
         ))}
       </div>
+      <InfoSection fields={ANALYTICS_FIELDS.style_matching} forceOpen={expandAllGuides} />
     </Card>
   );
 }
 
 /* -------------------------------------------------------------- balance */
 
-function BalanceMeter({ label, value, hint }: { label: string; value: number; hint?: string }) {
+function BalanceMeter({
+  label,
+  value,
+  hint,
+  field,
+}: {
+  label: React.ReactNode;
+  value: number;
+  hint?: string;
+  field?: FieldDefinition;
+}) {
   return (
     <div title={hint}>
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
-        <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>{label}</span>
+        <span
+          style={{
+            fontSize: 12.5,
+            color: "var(--text-secondary)",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          <span>{label}</span>
+          {field && <InfoTrigger field={field} />}
+        </span>
         <span className="share-value">{pct(value)}</span>
       </div>
       <div className="meter">
@@ -757,6 +824,7 @@ export function AnalyticsView({
   );
 
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [expandAllGuides, setExpandAllGuides] = useState<boolean | undefined>(undefined);
 
   function handleTriggerExport(options: { theme: "light" | "dark" }) {
     if (!data) return;
@@ -825,7 +893,16 @@ export function AnalyticsView({
           </Field>
           {refetching && <Spinner />}
         </div>
-        <div>
+        <div className="row" style={{ gap: 8 }}>
+          <button
+            type="button"
+            className={`btn ${expandAllGuides ? "btn--primary" : ""}`}
+            onClick={() => setExpandAllGuides((prev) => !prev)}
+            title={expandAllGuides ? "Collapse all field guides" : "Expand all field guides"}
+          >
+            <Icon name="info" size={15} />
+            {expandAllGuides ? "Hide Field Guides" : "Field Guides"}
+          </button>
           <button
             type="button"
             className="btn"
@@ -894,12 +971,35 @@ export function AnalyticsView({
                 <div className="stat-grid">
                   <Stat label="Participants" value={int(participants.length)} />
                   <Stat
-                    label="Avg reply"
+                    label={
+                      <span className="th-label">
+                        <span>Avg reply</span>
+                        <InfoTrigger field={findFieldDefinition("overview", "avg_reply")} />
+                      </span>
+                    }
                     value={duration(data.avg_response_time_seconds)}
                     note="across everyone"
                   />
-                  <Stat label="Busiest hour" value={`${busiest.label}:00`} note={`${int(busiest.value)} messages`} />
-                  <Stat label="Busiest day" value={busiestDay.key.slice(0, 3)} note={`${int(busiestDay.value)} messages`} />
+                  <Stat
+                    label={
+                      <span className="th-label">
+                        <span>Busiest hour</span>
+                        <InfoTrigger field={findFieldDefinition("overview", "busiest_hour")} />
+                      </span>
+                    }
+                    value={`${busiest.label}:00`}
+                    note={`${int(busiest.value)} messages`}
+                  />
+                  <Stat
+                    label={
+                      <span className="th-label">
+                        <span>Busiest day</span>
+                        <InfoTrigger field={findFieldDefinition("overview", "busiest_day")} />
+                      </span>
+                    }
+                    value={busiestDay.key.slice(0, 3)}
+                    note={`${int(busiestDay.value)} messages`}
+                  />
                 </div>
               </div>
 
@@ -910,36 +1010,67 @@ export function AnalyticsView({
                 >
                   <div className="stat-grid stat-grid--plain">
                     <Stat
-                      label="Sessions"
+                      label={
+                        <span className="th-label">
+                          <span>Sessions</span>
+                          <InfoTrigger field={findFieldDefinition("rhythm", "sessions")} />
+                        </span>
+                      }
                       value={compact(rhythm.session_count)}
                       note={`${rhythm.avg_messages_per_session.toFixed(0)} messages each`}
                     />
                     <Stat
-                      label="Typical session"
+                      label={
+                        <span className="th-label">
+                          <span>Typical session</span>
+                          <InfoTrigger field={findFieldDefinition("rhythm", "typical_session")} />
+                        </span>
+                      }
                       value={minutes(rhythm.avg_session_minutes)}
                       note="one sitting"
                     />
                     <Stat
-                      label="Active days"
+                      label={
+                        <span className="th-label">
+                          <span>Active days</span>
+                          <InfoTrigger field={findFieldDefinition("rhythm", "active_days")} />
+                        </span>
+                      }
                       value={`${int(rhythm.active_days)} / ${int(rhythm.span_days)}`}
                       note={`${pct(rhythm.active_day_percent)} of the span`}
                     />
                     <Stat
-                      label="Longest silence"
+                      label={
+                        <span className="th-label">
+                          <span>Longest silence</span>
+                          <InfoTrigger field={findFieldDefinition("rhythm", "longest_silence")} />
+                        </span>
+                      }
                       value={days(rhythm.longest_silence_days)}
                       note="no contact"
                     />
                     <Stat
-                      label="Late night"
+                      label={
+                        <span className="th-label">
+                          <span>Late night</span>
+                          <InfoTrigger field={findFieldDefinition("rhythm", "late_night")} />
+                        </span>
+                      }
                       value={pct(rhythm.late_night_percent)}
                       note="midnight to 05:00"
                     />
                     <Stat
-                      label="Silences"
+                      label={
+                        <span className="th-label">
+                          <span>Silences</span>
+                          <InfoTrigger field={findFieldDefinition("rhythm", "silences")} />
+                        </span>
+                      }
                       value={int(rhythm.silence_count)}
                       note="over 48 hours"
                     />
                   </div>
+                  <InfoSection fields={ANALYTICS_FIELDS.rhythm} forceOpen={expandAllGuides} />
                 </Card>
               )}
 
@@ -967,11 +1098,13 @@ export function AnalyticsView({
                 </Card>
               </div>
 
-              <BodyClock participants={participants} />
+              <BodyClock participants={participants} expandAllGuides={expandAllGuides} />
 
-              <LatencyTrend participants={participants} />
+              <LatencyTrend participants={participants} expandAllGuides={expandAllGuides} />
 
-              {data.style_matching && <StyleMatchingCard matching={data.style_matching} />}
+              {data.style_matching && (
+                <StyleMatchingCard matching={data.style_matching} expandAllGuides={expandAllGuides} />
+              )}
 
               {balance && (
                 <Card
@@ -983,23 +1116,30 @@ export function AnalyticsView({
                       label="Messages"
                       value={balance.message_balance_percent}
                       hint="How evenly the message count is shared"
+                      field={findFieldDefinition("balance", "message_balance")}
                     />
                     <BalanceMeter
                       label="Words"
                       value={balance.word_balance_percent}
                       hint="How evenly the word count is shared"
+                      field={findFieldDefinition("balance", "word_balance")}
                     />
                     <BalanceMeter
                       label="Who opens"
                       value={balance.initiation_balance_percent}
                       hint="How evenly conversations are started"
+                      field={findFieldDefinition("balance", "initiation_balance")}
                     />
                     <div title="Slowest participant's median reply over the fastest's">
-                      <div className="stat-label">Reply-time ratio</div>
+                      <div className="stat-label" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <span>Reply-time ratio</span>
+                        <InfoTrigger field={findFieldDefinition("balance", "response_time_ratio")} />
+                      </div>
                       <div className="stat-value">{ratio(balance.response_time_ratio)}</div>
                       <div className="stat-note">1.00× is the same pace</div>
                     </div>
                   </div>
+                  <InfoSection fields={ANALYTICS_FIELDS.balance} forceOpen={expandAllGuides} />
                 </Card>
               )}
 
@@ -1007,6 +1147,7 @@ export function AnalyticsView({
                 participants={participants}
                 chatId={data.chat_id}
                 onRederived={reload}
+                expandAllGuides={expandAllGuides}
               />
             </>
           )}

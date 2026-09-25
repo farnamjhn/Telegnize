@@ -10,7 +10,11 @@ type IconName =
   | "decisions"
   | "upload"
   | "trash"
-  | "pdf";
+  | "pdf"
+  | "info"
+  | "chevronDown"
+  | "chevronUp"
+  | "close";
 
 const PATHS: Record<IconName, ReactNode> = {
   chats: (
@@ -57,6 +61,15 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M7 11h6M7 14h4" />
     </>
   ),
+  info: (
+    <>
+      <circle cx="10" cy="10" r="7" />
+      <path d="M10 9v4.5M10 6.5h.01" />
+    </>
+  ),
+  chevronDown: <path d="m6 8 4 4 4-4" />,
+  chevronUp: <path d="m6 12 4-4 4 4" />,
+  close: <path d="M6 6l8 8M14 6l-8 8" />,
 };
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
@@ -119,7 +132,7 @@ export function Hero({
   value,
   note,
 }: {
-  label: string;
+  label: ReactNode;
   value: string;
   note?: string;
 }) {
@@ -138,7 +151,7 @@ export function Stat({
   value,
   note,
 }: {
-  label: string;
+  label: ReactNode;
   value: string;
   note?: string;
 }) {

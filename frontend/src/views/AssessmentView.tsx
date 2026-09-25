@@ -4,7 +4,9 @@ import { ChatSelect } from "../App";
 import { Card, Empty, Field, Hero, Icon, Notice, Spinner } from "../components/Primitives";
 import { ShareStrip, type Slice } from "../components/charts";
 import { ExportModal, PrintHeader, triggerPdfExport } from "../components/ExportModal";
+import { InfoSection, InfoTrigger } from "../components/InfoSection";
 import { ApiError, api } from "../lib/api";
+import { ASSESSMENT_FIELDS, findFieldDefinition } from "../lib/fieldDescriptions";
 import { compact, int, pct, pctOrDash, rate } from "../lib/format";
 import type { AssessmentRun, Chat, ParticipantAssessment } from "../lib/types";
 import { useAsync } from "../lib/useAsync";
@@ -201,6 +203,7 @@ export function AssessmentView({
   const [run, setRun] = useState<AssessmentRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [expandAllGuides, setExpandAllGuides] = useState<boolean | undefined>(undefined);
 
   const assessment = useAsync(
     () => (chatId == null ? null : api.assessment(chatId)),
@@ -398,17 +401,27 @@ export function AssessmentView({
             </button>
           </>
         )}
-        <button
-          type="button"
-          className="btn"
-          onClick={() => setExportModalOpen(true)}
-          disabled={!started}
-          title="Export the assessment report to PDF"
-          style={{ marginInlineStart: "auto" }}
-        >
-          <Icon name="pdf" size={15} />
-          Export to PDF
-        </button>
+        <div className="row" style={{ gap: 8, marginInlineStart: "auto" }}>
+          <button
+            type="button"
+            className={`btn ${expandAllGuides ? "btn--primary" : ""}`}
+            onClick={() => setExpandAllGuides((prev) => !prev)}
+            title={expandAllGuides ? "Collapse all field guides" : "Expand all field guides"}
+          >
+            <Icon name="info" size={15} />
+            {expandAllGuides ? "Hide Field Guides" : "Field Guides"}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setExportModalOpen(true)}
+            disabled={!started}
+            title="Export the assessment report to PDF"
+          >
+            <Icon name="pdf" size={15} />
+            Export to PDF
+          </button>
+        </div>
       </div>
 
       {error && <Notice tone="error">{error}</Notice>}
@@ -439,7 +452,14 @@ export function AssessmentView({
           <div className="grid grid--hero">
             <Card fill>
               <Hero
-                label="Coverage"
+                label={
+                  <span className="th-label">
+                    <span>Coverage</span>
+                    <InfoTrigger
+                      field={findFieldDefinition("coverage", "coverage", "assessment")}
+                    />
+                  </span>
+                }
                 value={pct(data.coverage_percent)}
                 note={`${compact(data.assessed_messages)} of ${compact(data.total_messages)} messages read`}
               />
@@ -453,6 +473,11 @@ export function AssessmentView({
                   ? "There is no requirement to assess a whole chat, and usually no reason to. A few hundred messages is enough to read a rate off, and the coverage figure keeps a partial result honest."
                   : "Nothing assessed yet. Time one small page on this machine before committing to a long run — a full pass over a large chat can take hours."}
               </p>
+              <InfoSection
+                fields={ASSESSMENT_FIELDS.coverage}
+                title="Coverage · Model assessment guidelines"
+                forceOpen={expandAllGuides}
+              />
             </Card>
           </div>
 
@@ -484,10 +509,16 @@ export function AssessmentView({
                     </div>
                   ))}
                 </div>
+                <InfoSection
+                  fields={ASSESSMENT_FIELDS.valence.filter((f) => f.key === "ratio")}
+                  title="Positivity Ratio & Tone Guidance"
+                  forceOpen={expandAllGuides}
+                />
               </Card>
 
               {GROUPS.map((g) => {
                 const groupColumns = COLUMNS[g.value];
+                const groupFields = ASSESSMENT_FIELDS[g.value];
                 return (
                   <Card key={g.value} title={`Participants · ${g.label}`} subtitle={GROUP_NOTE[g.value]} flush>
                     <div className="table-wrap">
@@ -495,11 +526,17 @@ export function AssessmentView({
                         <thead>
                           <tr>
                             <th>Participant</th>
-                            {groupColumns.map((column) => (
-                              <th key={column.key} className="num" title={column.hint}>
-                                {column.label}
-                              </th>
-                            ))}
+                            {groupColumns.map((column) => {
+                              const fieldDef = findFieldDefinition(g.value, column.key, "assessment");
+                              return (
+                                <th key={column.key} className="num" title={column.hint}>
+                                  <span className="th-label">
+                                    <span>{column.label}</span>
+                                    {fieldDef && <InfoTrigger field={fieldDef} />}
+                                  </span>
+                                </th>
+                              );
+                            })}
                           </tr>
                         </thead>
                         <tbody>
@@ -516,6 +553,15 @@ export function AssessmentView({
                         </tbody>
                       </table>
                     </div>
+                    {groupFields && (
+                      <div style={{ padding: "0 var(--pad-card) 16px" }}>
+                        <InfoSection
+                          fields={groupFields}
+                          title={`${g.label} · Field definitions & interpretation guide`}
+                          forceOpen={expandAllGuides}
+                        />
+                      </div>
+                    )}
                   </Card>
                 );
               })}
