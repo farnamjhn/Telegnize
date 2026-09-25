@@ -121,6 +121,7 @@ export function ColumnChart({
           className="chart"
           width={width}
           height={height}
+          viewBox={`0 0 ${width} ${height}`}
           role="img"
           aria-label={`${unit ?? "Messages"} by ${data.length} buckets`}
         >
@@ -284,6 +285,7 @@ export function TrendChart({
           className="chart"
           width={width}
           height={height}
+          viewBox={`0 0 ${width} ${height}`}
           role="img"
           aria-label={`Trend over ${periods.length} periods`}
         >

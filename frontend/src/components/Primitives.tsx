@@ -9,7 +9,8 @@ type IconName =
   | "messages"
   | "decisions"
   | "upload"
-  | "trash";
+  | "trash"
+  | "pdf";
 
 const PATHS: Record<IconName, ReactNode> = {
   chats: (
@@ -47,6 +48,13 @@ const PATHS: Record<IconName, ReactNode> = {
   trash: (
     <>
       <path d="M3.5 5.5h13M8 5.5V4h4v1.5M5 5.5 5.8 16h8.4L15 5.5" />
+    </>
+  ),
+  pdf: (
+    <>
+      <path d="M4.5 3.5A1.5 1.5 0 0 1 6 2h5.5l4 4v10.5a1.5 1.5 0 0 1-1.5 1.5H6a1.5 1.5 0 0 1-1.5-1.5z" />
+      <path d="M11.5 2v4H15.5" />
+      <path d="M7 11h6M7 14h4" />
     </>
   ),
 };
