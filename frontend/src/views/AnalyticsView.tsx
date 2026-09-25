@@ -10,7 +10,6 @@ import {
   Notice,
   Spinner,
   Stat,
-  Toggle,
   ViewToggle,
 } from "../components/Primitives";
 import {
@@ -462,11 +461,8 @@ function Participants({
   chatId: number;
   onRederived: () => void;
 }) {
-  const [group, setGroup] = useState<MetricGroup>("volume");
   const [rederiving, setRederiving] = useState(false);
   const [rederiveError, setRederiveError] = useState<string | null>(null);
-  const columns = COLUMNS[group];
-  const missing = markersMissing(group, participants);
 
   async function rederive() {
     setRederiving(true);
@@ -482,80 +478,79 @@ function Participants({
   }
 
   return (
-    <Card
-      title="Participants"
-      subtitle={GROUP_NOTE[group]}
-      action={<Toggle label="Metric group" value={group} onChange={setGroup} options={GROUPS} />}
-      flush
-    >
-      {missing && (
-        <div style={{ padding: "0 var(--pad-card) 4px" }}>
-          <Notice tone="error">
-            Every marker in this group reads zero. These counts are written as messages are
-            stored, so a chat imported before the metric existed has none. They are all
-            derived from text already in the database, so recomputing fills them in — the
-            export is not needed.
-            <div style={{ marginTop: 10 }}>
-              <button className="btn" disabled={rederiving} onClick={() => void rederive()}>
-                {rederiving && <span className="spinner" />}
-                Recompute from stored text
-              </button>
-            </div>
-          </Notice>
-        </div>
-      )}
-      {rederiveError && (
-        <div style={{ padding: "0 var(--pad-card) 4px" }}>
-          <Notice tone="error">{rederiveError}</Notice>
-        </div>
-      )}
-      {group === "composition" && voiceDurationsMissing(participants) && (
-        <div style={{ padding: "0 var(--pad-card) 4px" }}>
-          <Notice>
-            Voice notes are here but none carry a length, so the time columns read —. A
-            duration lives in the export rather than in the message text, which is the one
-            thing recomputing cannot recover: re-import the export to fill it in.
-          </Notice>
-        </div>
-      )}
-      <div className="table-wrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Participant</th>
-              {columns.map((column) => (
-                <th key={column.key} className="num" title={column.hint}>
-                  {column.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {participants.map((person) => (
-              <tr key={person.sender_id}>
-                <td>
-                  <div style={{ fontWeight: 500 }}>{person.sender_name}</div>
-                  <div className="share" style={{ marginTop: 5, maxWidth: 180 }}>
-                    <span className="share-track">
-                      <span
-                        className="share-fill"
-                        style={{ width: `${person.message_share_percent}%` }}
-                      />
-                    </span>
-                    <span className="share-value">{pct(person.message_share_percent)}</span>
+    <div style={{ display: "grid", gap: 16 }}>
+      {rederiveError && <Notice tone="error">{rederiveError}</Notice>}
+      {GROUPS.map((g) => {
+        const columns = COLUMNS[g.value];
+        const missing = markersMissing(g.value, participants);
+        return (
+          <Card key={g.value} title={`Participants · ${g.label}`} subtitle={GROUP_NOTE[g.value]} flush>
+            {missing && (
+              <div style={{ padding: "0 var(--pad-card) 4px" }}>
+                <Notice tone="error">
+                  Every marker in this group reads zero. These counts are written as messages
+                  are stored, so a chat imported before the metric existed has none. They are
+                  all derived from text already in the database, so recomputing fills them in
+                  — the export is not needed.
+                  <div style={{ marginTop: 10 }}>
+                    <button className="btn" disabled={rederiving} onClick={() => void rederive()}>
+                      {rederiving && <span className="spinner" />}
+                      Recompute from stored text
+                    </button>
                   </div>
-                </td>
-                {columns.map((column) => (
-                  <td key={column.key} className="num">
-                    {column.render(person)}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
+                </Notice>
+              </div>
+            )}
+            {g.value === "composition" && voiceDurationsMissing(participants) && (
+              <div style={{ padding: "0 var(--pad-card) 4px" }}>
+                <Notice>
+                  Voice notes are here but none carry a length, so the time columns read —. A
+                  duration lives in the export rather than in the message text, which is the
+                  one thing recomputing cannot recover: re-import the export to fill it in.
+                </Notice>
+              </div>
+            )}
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Participant</th>
+                    {columns.map((column) => (
+                      <th key={column.key} className="num" title={column.hint}>
+                        {column.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {participants.map((person) => (
+                    <tr key={person.sender_id}>
+                      <td>
+                        <div style={{ fontWeight: 500 }}>{person.sender_name}</div>
+                        <div className="share" style={{ marginTop: 5, maxWidth: 180 }}>
+                          <span className="share-track">
+                            <span
+                              className="share-fill"
+                              style={{ width: `${person.message_share_percent}%` }}
+                            />
+                          </span>
+                          <span className="share-value">{pct(person.message_share_percent)}</span>
+                        </div>
+                      </td>
+                      {columns.map((column) => (
+                        <td key={column.key} className="num">
+                          {column.render(person)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        );
+      })}
+    </div>
   );
 }
 
@@ -757,9 +752,8 @@ function ExportModal({
   totalMessages: number;
   isOpen: boolean;
   onClose: () => void;
-  onExport: (options: { scope: "full" | "active"; theme: "light" | "dark" }) => void;
+  onExport: (options: { theme: "light" | "dark" }) => void;
 }) {
-  const [scope, setScope] = useState<"full" | "active">("full");
   const [theme, setTheme] = useState<"light" | "dark">("light");
 
   if (!isOpen) return null;
@@ -793,49 +787,6 @@ function ExportModal({
         </header>
 
         <div className="modal-body">
-          <div>
-            <div className="modal-section-title">Report Scope</div>
-            <div className="option-group">
-              <label
-                className={`option-card ${scope === "full" ? "is-selected" : ""}`}
-                onClick={() => setScope("full")}
-              >
-                <input
-                  type="radio"
-                  name="export-scope"
-                  className="option-radio"
-                  checked={scope === "full"}
-                  onChange={() => setScope("full")}
-                />
-                <div className="option-content">
-                  <span className="option-label">Full Analytics Dossier</span>
-                  <span className="option-hint">
-                    Complete report containing all 8 participant metric sections with their reference notes.
-                  </span>
-                </div>
-              </label>
-
-              <label
-                className={`option-card ${scope === "active" ? "is-selected" : ""}`}
-                onClick={() => setScope("active")}
-              >
-                <input
-                  type="radio"
-                  name="export-scope"
-                  className="option-radio"
-                  checked={scope === "active"}
-                  onChange={() => setScope("active")}
-                />
-                <div className="option-content">
-                  <span className="option-label">Current View Only</span>
-                  <span className="option-hint">
-                    Export charts and only the participant metric section currently open on screen.
-                  </span>
-                </div>
-              </label>
-            </div>
-          </div>
-
           <div>
             <div className="modal-section-title">Color Theme</div>
             <div className="option-group">
@@ -888,7 +839,7 @@ function ExportModal({
             type="button"
             className="btn btn--primary"
             onClick={() => {
-              onExport({ scope, theme });
+              onExport({ theme });
               onClose();
             }}
           >
@@ -919,7 +870,7 @@ export function AnalyticsView({
 
   const [exportModalOpen, setExportModalOpen] = useState(false);
 
-  function handleTriggerExport(options: { scope: "full" | "active"; theme: "light" | "dark" }) {
+  function handleTriggerExport(options: { theme: "light" | "dark" }) {
     if (!data) return;
 
     const previousTitle = document.title;
@@ -927,12 +878,10 @@ export function AnalyticsView({
     document.title = `${safeChatName} - Telegnize Analytics`;
 
     document.body.setAttribute("data-print-theme", options.theme);
-    document.body.setAttribute("data-print-scope", options.scope);
 
     const cleanup = () => {
       document.title = previousTitle;
       document.body.removeAttribute("data-print-theme");
-      document.body.removeAttribute("data-print-scope");
       window.removeEventListener("afterprint", cleanup);
     };
 
@@ -1215,65 +1164,11 @@ export function AnalyticsView({
                 </Card>
               )}
 
-              <div className="screen-only-participants">
-                <Participants
-                  participants={participants}
-                  chatId={data.chat_id}
-                  onRederived={reload}
-                />
-              </div>
-
-              <div className="print-full-dossier">
-                {GROUPS.map((g) => {
-                  const columns = COLUMNS[g.value];
-                  return (
-                    <Card
-                      key={g.value}
-                      title={`Participants · ${g.label}`}
-                      subtitle={GROUP_NOTE[g.value]}
-                      flush
-                    >
-                      <div className="table-wrap">
-                        <table className="table">
-                          <thead>
-                            <tr>
-                              <th>Participant</th>
-                              {columns.map((column) => (
-                                <th key={column.key} className="num" title={column.hint}>
-                                  {column.label}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {participants.map((person) => (
-                              <tr key={person.sender_id}>
-                                <td>
-                                  <div style={{ fontWeight: 500 }}>{person.sender_name}</div>
-                                  <div className="share" style={{ marginTop: 5, maxWidth: 180 }}>
-                                    <span className="share-track">
-                                      <span
-                                        className="share-fill"
-                                        style={{ width: `${person.message_share_percent}%` }}
-                                      />
-                                    </span>
-                                    <span className="share-value">{pct(person.message_share_percent)}</span>
-                                  </div>
-                                </td>
-                                {columns.map((column) => (
-                                  <td key={column.key} className="num">
-                                    {column.render(person)}
-                                  </td>
-                                ))}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
+              <Participants
+                participants={participants}
+                chatId={data.chat_id}
+                onRederived={reload}
+              />
             </>
           )}
         </div>

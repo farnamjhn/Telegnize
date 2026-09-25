@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ChatSelect } from "../App";
-import { Card, Empty, Field, Hero, Notice, Spinner, Toggle } from "../components/Primitives";
+import { Card, Empty, Field, Hero, Notice, Spinner } from "../components/Primitives";
 import { ShareStrip, type Slice } from "../components/charts";
 import { ApiError, api } from "../lib/api";
 import { compact, int, pct, pctOrDash, rate } from "../lib/format";
@@ -199,7 +199,6 @@ export function AssessmentView({
   const [offset, setOffset] = useState(0);
   const [run, setRun] = useState<AssessmentRun | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [group, setGroup] = useState<Group>("valence");
 
   const assessment = useAsync(
     () => (chatId == null ? null : api.assessment(chatId)),
@@ -266,7 +265,15 @@ export function AssessmentView({
     try {
       setRun(await api.startAssessmentRun(chatId, offset, pageSize, pages));
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : String(cause));
+      setError(
+        // A plain 404 with no chat named means the route itself is missing:
+        // the page was updated and the API process is still the old one.
+        cause instanceof ApiError && cause.status === 404 && cause.message === "Not Found"
+          ? "The API server is running older code that cannot run assessments in the background. Restart it (stop launch.sh and run it again), then try again."
+          : cause instanceof ApiError
+            ? cause.message
+            : String(cause),
+      );
     }
   }
 
@@ -295,7 +302,6 @@ export function AssessmentView({
   const data = assessment.data;
   const participants = data?.participants ?? [];
   const started = (data?.assessed_messages ?? 0) > 0;
-  const columns = COLUMNS[group];
 
   return (
     <div className="view">
@@ -439,37 +445,39 @@ export function AssessmentView({
                 </div>
               </Card>
 
-              <Card title="Participants" subtitle={GROUP_NOTE[group]}
-                action={<Toggle label="Metric group" value={group} onChange={setGroup} options={GROUPS} />}
-                flush
-              >
-                <div className="table-wrap">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Participant</th>
-                        {columns.map((column) => (
-                          <th key={column.key} className="num" title={column.hint}>
-                            {column.label}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {participants.map((person) => (
-                        <tr key={person.sender_id}>
-                          <td style={{ fontWeight: 500 }}>{person.sender_name}</td>
-                          {columns.map((column) => (
-                            <td key={column.key} className="num">
-                              {column.render(person)}
-                            </td>
+              {GROUPS.map((g) => {
+                const groupColumns = COLUMNS[g.value];
+                return (
+                  <Card key={g.value} title={`Participants · ${g.label}`} subtitle={GROUP_NOTE[g.value]} flush>
+                    <div className="table-wrap">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Participant</th>
+                            {groupColumns.map((column) => (
+                              <th key={column.key} className="num" title={column.hint}>
+                                {column.label}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {participants.map((person) => (
+                            <tr key={person.sender_id}>
+                              <td style={{ fontWeight: 500 }}>{person.sender_name}</td>
+                              {groupColumns.map((column) => (
+                                <td key={column.key} className="num">
+                                  {column.render(person)}
+                                </td>
+                              ))}
+                            </tr>
                           ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
+                );
+              })}
 
               <Notice>
                 These borrow the vocabulary of Gottman's observational research, which coded

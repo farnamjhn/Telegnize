@@ -1167,10 +1167,6 @@ a {
   display: none !important;
 }
 
-.print-full-dossier {
-  display: none;
-}
-
 @media print {
   @page {
     size: A4 portrait;
@@ -1262,19 +1258,6 @@ a {
 
   .print-only {
     display: block !important;
-  }
-
-  /* Full dossier vs single view */
-  body[data-print-scope="full"] .print-full-dossier,
-  body:not([data-print-scope="active"]) .print-full-dossier {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 16px !important;
-  }
-
-  body[data-print-scope="full"] .screen-only-participants,
-  body:not([data-print-scope="active"]) .screen-only-participants {
-    display: none !important;
   }
 
   .view {
