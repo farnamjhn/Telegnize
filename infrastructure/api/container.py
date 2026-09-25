@@ -67,6 +67,7 @@ class Container:
         engine: IDecisionEngine = LayaDecisionEngine(
             preload=self.settings.preload_decision_engine,
             resident_checkpoints=self.settings.resident_checkpoints,
+            custom_model_path=self.settings.decision_model_path,
         )
         if self.settings.decision_cache_entries <= 0:
             return engine

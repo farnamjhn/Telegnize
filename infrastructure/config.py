@@ -36,6 +36,18 @@ def _env_list(name: str, default: list[str]) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+DEFAULT_FINETUNED_MODEL_DIR = "checkpoints/laya-multilingual-telegnize"
+
+
+def _default_decision_model_path() -> str | None:
+    env_val = os.getenv(f"{ENV_PREFIX}DECISION_MODEL_PATH")
+    if env_val is not None:
+        return env_val.strip() if env_val.strip() else None
+    if os.path.isdir(DEFAULT_FINETUNED_MODEL_DIR):
+        return DEFAULT_FINETUNED_MODEL_DIR
+    return None
+
+
 @dataclass(frozen=True)
 class Settings:
     """Everything the process needs to know about its environment."""
@@ -122,4 +134,9 @@ class Settings:
     #: 0 disables the cache.
     decision_cache_entries: int = field(
         default_factory=lambda: _env_int("DECISION_CACHE_ENTRIES", 10_000)
+    )
+    #: Path to custom fine-tuned Laya checkpoint directory.
+    #: Defaults to checkpoints/laya-multilingual-telegnize if present.
+    decision_model_path: str | None = field(
+        default_factory=_default_decision_model_path
     )

@@ -60,9 +60,11 @@ class LayaDecisionEngine(IDecisionEngine):
         self,
         preload: bool = False,
         resident_checkpoints: int = RESIDENT_CHECKPOINTS,
+        custom_model_path: str | None = None,
     ) -> None:
         self._preload = preload
         self._resident_checkpoints = max(1, resident_checkpoints)
+        self._custom_model_path = custom_model_path
         self._router: Any | None = None
         self._lock = threading.Lock()
         if preload:
@@ -76,10 +78,25 @@ class LayaDecisionEngine(IDecisionEngine):
                     from laya import Router  # imported late: heavy, optional
 
                     logger.info(
-                        "Loading Laya router (preload=%s, resident=%d).",
-                        self._preload, self._resident_checkpoints,
+                        "Loading Laya router (preload=%s, resident=%d, custom=%s).",
+                        self._preload,
+                        self._resident_checkpoints,
+                        self._custom_model_path,
+                    )
+                    models = (
+                        {
+                            "multilingual": self._custom_model_path,
+                            "english": self._custom_model_path,
+                        }
+                        if self._custom_model_path
+                        else None
+                    )
+                    default_model = (
+                        "multilingual" if self._custom_model_path else "english"
                     )
                     self._router = Router(
+                        models=models,
+                        default=default_model,
                         preload=self._preload,
                         max_loaded=self._resident_checkpoints,
                     )
