@@ -5,7 +5,7 @@ from application.services.assessment_service import AssessmentService
 from domain.errors import ChatNotFoundError
 from domain.models.analysis import DecisionTarget
 from domain.models.chat import Chat
-from domain.models.message import Message
+from domain.models.message import ContentType, Message
 from tests.conftest import memory_container
 from tests.fakes import FakeDecisionEngine
 
@@ -256,6 +256,28 @@ class TestAggregation(AssessmentTestCase):
 
     def test_coverage_is_reported_against_the_whole_chat(self):
         self.given_messages(*[("u1", f"note {i}") for i in range(4)])
+        self.service().assess_page(self.chat.id, limit=2)
+        assessment = self.service().get_assessment(self.chat.id)
+        self.assertEqual(assessment.assessed_messages, 2)
+        self.assertEqual(assessment.total_messages, 4)
+        self.assertEqual(assessment.coverage_percent, 50.0)
+
+    def test_coverage_ignores_textless_media(self):
+        # A sticker carries no text to assess, so it should not inflate the
+        # denominator and understate coverage.
+        self.given_messages(*[("u1", f"note {i}") for i in range(4)])
+        self.messages.save(
+            Message(
+                id=0,
+                chat_id=self.chat.id,
+                telegram_msg_id=99,
+                sender_id="u1",
+                sender_name="Alice",
+                timestamp=BASE_TIME + timedelta(minutes=10),
+                text="",
+                content_type=ContentType.STICKER,
+            )
+        )
         self.service().assess_page(self.chat.id, limit=2)
         assessment = self.service().get_assessment(self.chat.id)
         self.assertEqual(assessment.assessed_messages, 2)

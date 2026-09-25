@@ -188,6 +188,29 @@ class TestMessageAggregates(RepositoryTestCase):
     def test_language_distribution(self):
         self.assertEqual(self.messages.get_language_distribution(1), {"fa": 3})
 
+    def test_language_distribution_excludes_textless_media(self):
+        self.messages.save(
+            message(
+                telegram_msg_id=4,
+                content_type=ContentType.STICKER,
+                text="",
+                language=Language.UNKNOWN,
+            )
+        )
+        self.assertEqual(self.messages.get_language_distribution(1), {"fa": 3})
+
+    def test_assessable_count_excludes_textless_media(self):
+        self.messages.save(
+            message(
+                telegram_msg_id=4,
+                content_type=ContentType.STICKER,
+                text="",
+                language=Language.UNKNOWN,
+            )
+        )
+        self.assertEqual(self.messages.count_by_chat(1), 4)
+        self.assertEqual(self.messages.count_assessable_by_chat(1), 3)
+
     def test_date_range(self):
         first, last = self.messages.get_date_range(1)
         self.assertEqual(first, BASE_TIME.isoformat(sep=" "))

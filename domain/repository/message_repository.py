@@ -53,6 +53,16 @@ class IMessageRepository(ABC):
         """Counts messages in a chat."""
 
     @abstractmethod
+    def count_assessable_by_chat(self, chat_id: int) -> int:
+        """Counts messages in a chat that carry text a classifier can read.
+
+        Excludes media (photos, stickers, voice notes, documents) sent without
+        a caption, which has no text and can never be assessed, so coverage is
+        measured against what could possibly be read rather than every item
+        sent.
+        """
+
+    @abstractmethod
     def get_date_range(self, chat_id: int) -> tuple[str | None, str | None]:
         """Returns the (first, last) message timestamps of a chat as ISO strings."""
 

@@ -526,6 +526,15 @@ class SQLiteMessageRepository(IMessageRepository):
                 "SELECT COUNT(*) FROM messages WHERE chat_id = ?;", (chat_id,)
             ).fetchone()[0]
 
+    def count_assessable_by_chat(self, chat_id: int) -> int:
+        with self._db.connect() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE chat_id = ? AND ("
+                "TRIM(COALESCE(normalized_text, '')) != '' "
+                "OR TRIM(COALESCE(text_content, '')) != '');",
+                (chat_id,),
+            ).fetchone()[0]
+
     def get_date_range(self, chat_id: int) -> tuple[str | None, str | None]:
         with self._db.connect() as conn:
             row = conn.execute(
@@ -605,10 +614,17 @@ class SQLiteMessageRepository(IMessageRepository):
         }
 
     def get_language_distribution(self, chat_id: int) -> dict[str, int]:
+        """Language shares among messages with actual text.
+
+        Media (photos, stickers, voice notes, documents) carries no text to
+        detect a script from, so the normalizer tags it "unknown" — that is
+        not a language, and counting it here would read as a chat full of
+        unclassifiable text rather than what it is: pictures and stickers.
+        """
         with self._db.connect() as conn:
             rows = conn.execute(
                 "SELECT language, COUNT(*) AS total FROM messages "
-                "WHERE chat_id = ? GROUP BY language;",
+                "WHERE chat_id = ? AND language != 'unknown' GROUP BY language;",
                 (chat_id,),
             ).fetchall()
         return {row["language"]: row["total"] for row in rows}

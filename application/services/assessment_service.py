@@ -210,7 +210,7 @@ class AssessmentService:
         if chat is None:
             raise ChatNotFoundError(chat_id)
 
-        total = self._messages.count_by_chat(chat_id)
+        total = self._messages.count_assessable_by_chat(chat_id)
         assessed = self._decisions.count_answered_in_chat(chat_id, _COVERAGE_KEY)
         if assessed == 0:
             return RelationalAssessmentDTO(
